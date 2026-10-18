@@ -2,7 +2,7 @@
 
 在手机微信里接收 Tibo（[@thsottiaux](https://x.com/thsottiaux)）的额度重置预告、发放进度和完成通知。当前关注 Codex / ChatGPT Work 的全局额度公告。
 
-适合自己或少量朋友使用，每个人部署到自己的 Cloudflare 账号。提供 Windows 中文向导，电脑关机后监控仍在云端运行。
+通过 Windows 中文向导部署到 Cloudflare，电脑关机后监控仍在云端运行。
 
 **[下载源码 ZIP](https://github.com/wmxxhb/did-gpt-reset-today/archive/refs/heads/main.zip)** → 解压 → 双击 `打开工具.cmd`。
 
@@ -67,13 +67,13 @@ Cloudflare 首次开通免费网址时可能仍出现英文提示：是否创建
 
 关闭窗口或电脑关机不会停止已部署的云端监控。只有从菜单选择暂停才停止提醒。
 
-管理凭据保存在 `.tibo-local/profile.dat`，使用 Windows DPAPI 绑定当前系统用户加密。请勿把 `.tibo-local` 发给朋友；换电脑或系统用户后，可以重新接管。微信推送 token 上传到 Cloudflare Secrets，向导不会将它明文写入项目文件。
+管理凭据保存在 `.tibo-local/profile.dat`，使用 Windows DPAPI 绑定当前系统用户加密。请勿共享 `.tibo-local` 目录；换电脑或系统用户后，可以重新接管。微信推送 token 上传到 Cloudflare Secrets，向导不会将它明文写入项目文件。
 
-## 分享给朋友
+## 下载与分发
 
-把仓库链接或源码 ZIP 发给朋友，解压后双击入口。公开文件不包含个人凭据、Cloudflare 登录状态、依赖目录或运行记录。请不要直接打包已经使用过的整个工作目录，里面可能存在本机配置；敏感文件的范围见 [SECURITY.md](SECURITY.md)。
+从本仓库下载源码 ZIP，解压后双击入口即可开始配置。公开文件不包含个人凭据、Cloudflare 登录状态、依赖目录或运行记录。分发时请使用仓库链接或源码 ZIP；已经使用过的工作目录可能含有本机配置，敏感文件的范围见 [SECURITY.md](SECURITY.md)。
 
-每个人使用自己的 Cloudflare 账号和自己的公众号 token；目前不是多人共用的托管订阅服务。中文管理向导的本机凭据保存当前面向 Windows。
+部署时使用你的 Cloudflare 账号和微信推送 token。中文管理向导支持 Windows。
 
 ## 数据与可靠性
 
@@ -100,13 +100,13 @@ npm run preview
 npm run dev
 ```
 
-原 `npm run setup` 和 `启动部署.ps1` 入口继续兼容。开发预览不发送微信消息。本地 Worker 配置参见 `.dev.vars.example`。
+也可以使用 `npm run setup` 或 `启动部署.ps1` 启动向导。开发预览不发送微信消息。本地 Worker 配置参见 `.dev.vars.example`。
 
-管理 API 继续支持 `/status`、`/test`、`/check`、`/pause`、`/resume`，新增 `/settings`（GET/POST）和测试确认接口，均需要 `Authorization: Bearer 管理密钥`。菜单会自动完成这些调用。
+管理 API 包括 `/status`、`/test`、`/check`、`/pause`、`/resume`、`/settings`（GET/POST）和测试确认接口，均需要 `Authorization: Bearer 管理密钥`。菜单会自动完成这些调用。
 
 发布前请先暂存要提交的文件，再执行 `npm run check:public`。GitHub Actions 在 Windows 和 Linux 上执行测试及公开发布检查，不部署实例、不读取用户密钥，也不发送微信通知。
 
-产品名与部署标识分开维护：`wrangler.jsonc` 中的 `tibo-wechat-reset-alert` 是现有 Cloudflare 服务的稳定标识，重命名产品时保留它以兼容已部署实例。新用户也使用相同服务名，账号子域名由自己的 Cloudflare 账号分配。
+`wrangler.jsonc` 中的 `tibo-wechat-reset-alert` 是 Cloudflare 服务名，账号子域名由 Cloudflare 账号分配。升级已有实例时请保持服务名不变，以连接原有服务和数据。
 
 ## 目录结构
 
