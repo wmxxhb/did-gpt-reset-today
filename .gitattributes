@@ -4,5 +4,6 @@
 *.jsonc text eol=lf
 *.md text eol=lf
 *.yml text eol=lf
-*.cmd text eol=crlf
+# Preserve CRLF in Git blobs so GitHub source ZIPs can run in Windows cmd.exe.
+*.cmd -text whitespace=cr-at-eol
 *.ps1 text eol=crlf
