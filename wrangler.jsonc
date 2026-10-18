@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tibo-wechat-reset-alert",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2025-10-01",
+  "workers_dev": true,
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "durable_objects": {
+    "bindings": [{ "name": "MONITOR", "class_name": "ResetMonitor" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ResetMonitor"] }],
+  "vars": {
+    "PUSHPLUS_CHANNEL": "wechat",
+    "MAX_AGE_HOURS": "72"
+  },
+  "observability": { "enabled": true }
+}

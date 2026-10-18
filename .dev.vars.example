@@ -1,0 +1,11 @@
+# Copy to .dev.vars for local use. Never commit the real file.
+PUSH_PROVIDER=xtuis
+XTUIS_TOKEN=your_xtuis_token
+ADMIN_TOKEN=use_a_random_secret_at_least_32_characters_long
+# Required by the data provider: identify this project and supply your contact URL/email.
+SOURCE_USER_AGENT=DidGPTResetToday/0.1 (+mailto:your-email@example.com)
+# Optional, after configuring an enterprise WeChat channel in pushplus:
+# PUSH_PROVIDER=pushplus
+# PUSHPLUS_TOKEN=your_pushplus_message_token
+# PUSHPLUS_CHANNEL=cp
+# PUSHPLUS_OPTION=your_channel_code

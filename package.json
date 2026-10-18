@@ -1,0 +1,21 @@
+{
+  "name": "did-gpt-reset-today",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check:public": "node scripts/check-public.mjs",
+    "preview": "node scripts/preview.mjs",
+    "setup": "node scripts/setup.mjs",
+    "manage": "node scripts/manage.mjs",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --test-scheduled"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
