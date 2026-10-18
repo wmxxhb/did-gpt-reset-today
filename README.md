@@ -113,6 +113,7 @@ npm run dev
 ```text
 打开工具.cmd          Windows 双击入口
 启动部署.ps1          运行环境检测与启动
+start.ps1             Windows 启动实现
 先看这里.txt          简短使用说明
 src/                  云端监控、消息识别、通知和设置
 scripts/              中文管理向导与 Windows 网络/凭据适配
