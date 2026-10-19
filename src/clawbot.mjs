@@ -6,6 +6,11 @@ const QUEUE_TTL = 3600000;
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 const initial = () => ({ enabled: false, queue: [], seen: {}, sent: 0, lastError: null });
 const validText = (value, max = 8192) => typeof value === 'string' && value.length > 0 && value.length <= max;
+function record(s, item, status, now) {
+  s.recent ||= [];
+  s.recent = s.recent.filter(row => row.key !== item.key);
+  s.recent.unshift({ key: item.key, status, at: now }); s.recent = s.recent.slice(0, 40);
+}
 
 export function ilinkOrigin(value = BASE) {
   let u;
@@ -35,6 +40,7 @@ export function clawbotStatus(s, now = Date.now()) {
   return { enabled: s.enabled, state, expiresAt, remainingEstimate: Math.max(0, 10 - s.sent),
     lastError: s.lastError, pending: s.queue.filter(q => q.expiresAt > now).length,
     lastTest: s.lastTest || null, lastAcceptedAt: s.lastAcceptedAt || null,
+    configured: !!s.token, recent: s.recent || [],
     note: '会话约 24 小时、连续约 10 条；额度为本工具估计，微信实际限制为准。接口接受不等于手机已收到。' };
 }
 
@@ -127,6 +133,7 @@ export class ClawBot {
             || !Number.isFinite(at) || at < s.boundAt || at > this.clock() + 60000 || at <= (s.lastInboundAt || 0)) continue;
         s.context = message.context_token; s.lastInboundAt = Math.min(at, this.clock());
         s.sent = 0; s.blocked = false; s.lastError = null;
+        s.ack = { id: crypto.randomUUID(), at: s.lastInboundAt };
       }
       if (typeof data.get_updates_buf === 'string') s.buf = data.get_updates_buf;
       if (['clawbot_timeout', 'clawbot_unavailable'].includes(s.lastError)) s.lastError = null;
@@ -141,13 +148,14 @@ export class ClawBot {
     const s = await this.load();
     if (!s.enabled) return;
     const now = this.clock();
-    s.queue = s.queue.filter(q => q.expiresAt > now);
+    s.queue = s.queue.filter(q => { if (q.expiresAt <= now) record(s, q, 'expired', now); return q.expiresAt > now; });
     for (const item of items) {
       if (!validText(item.key, 512) || !validText(item.title, 1024) || !validText(item.content, 50000)
-          || !Number.isFinite(item.queuedAt) || item.queuedAt < s.boundAt || item.queuedAt + QUEUE_TTL <= now
+          || !Number.isFinite(item.queuedAt) || item.queuedAt < Math.max(s.boundAt, s.enabledAt || 0) || item.queuedAt + QUEUE_TTL <= now
           || s.seen[item.key] || s.queue.some(q => q.key === item.key)) continue;
       if (s.queue.length >= 100) throw new Error('clawbot_queue_full');
       s.queue.push({ ...item, id: crypto.randomUUID(), expiresAt: item.queuedAt + QUEUE_TTL, attempts: 0, nextAttempt: 0 });
+      record(s, item, 'queued', now);
     }
     await this.save(s);
   }
@@ -181,16 +189,28 @@ export class ClawBot {
     } finally { await this.save(s); }
   }
 
-  async tick({ paused = false, settings } = {}) {
+  async policy(s, { paused = false, settings, revision = 0 } = {}) {
+    if (revision < (s.policyRevision || 0)) return;
+    s.policyRevision = revision; s.paused = paused;
+    if (settings) s.settings = settings;
+    const { allowsNotification } = await import('./settings.mjs');
+    s.queue = s.queue.filter(q => {
+      const status = paused ? 'paused' : !allowsNotification(q, s.settings) ? 'filtered' : null;
+      if (status) record(s, q, status, this.clock());
+      return !status;
+    });
+  }
+
+  async tick(input = {}) {
     const s = await this.load();
     if (!s.enabled) return clawbotStatus(s, this.clock());
-    s.queue = s.queue.filter(q => q.expiresAt > this.clock());
-    if (settings) {
-      const { allowsNotification } = await import('./settings.mjs');
-      s.queue = s.queue.filter(q => allowsNotification(q, settings));
-    }
+    s.queue = s.queue.filter(q => {
+      if (q.expiresAt <= this.clock()) record(s, q, 'expired', this.clock());
+      return q.expiresAt > this.clock();
+    });
+    await this.policy(s, input);
     await this.refresh(s);
-    if (!paused) {
+    if (!s.paused) {
       // One attempt per tick bounds latency and conserves the small session quota.
       const item = s.queue.find(q => q.nextAttempt <= this.clock());
       if (item && ['ready', 'error'].includes(clawbotStatus(s, this.clock()).state)) {
@@ -198,8 +218,16 @@ export class ClawBot {
         await this.save(s);
         try {
           await this.send(s, item);
+          record(s, item, 'accepted', this.clock());
           s.seen[item.key] = this.clock(); s.queue = s.queue.filter(q => q.key !== item.key);
-        } catch { /* Error already recorded; the primary service remains independent. */ }
+        } catch { record(s, item, 'failed', this.clock()); }
+      } else if (!s.queue.length && s.ack && clawbotStatus(s, this.clock()).state === 'ready') {
+        // At most one acknowledgement per reply, without creating a retry loop.
+        const ack = s.ack; delete s.ack; await this.save(s);
+        try {
+          await this.send(s, { id: ack.id, title: '聊天提醒已恢复',
+            content: '已收到你的回复，接下来会按设置发送重置消息。约 24 小时或连续约 10 条后，请再回复一句话。' });
+        } catch { /* The next user reply can recover the session. */ }
       }
     }
     for (const [key, at] of Object.entries(s.seen)) if (this.clock() - at > 3 * DAY) delete s.seen[key];
@@ -220,6 +248,17 @@ export class ClawBot {
       if (path === '/clawbot/login/start') return json(await this.loginStart());
       if (path === '/clawbot/login/poll') return json(await this.loginPoll(input));
       if (path === '/clawbot/disable') { await this.save(initial()); return json({ state: 'disabled' }); }
+      if (path === '/clawbot/toggle') {
+        if (typeof input.enabled !== 'boolean') return json({ error: 'invalid_request' }, 400);
+        const s = await this.load();
+        if (input.enabled && !s.token) return json({ error: 'clawbot_login_expired' }, 409);
+        if (input.enabled && !s.enabled) s.enabledAt = this.clock();
+        if (!input.enabled) s.queue = [];
+        s.enabled = input.enabled; await this.save(s); return json(clawbotStatus(s, this.clock()));
+      }
+      if (path === '/clawbot/policy') {
+        const s = await this.load(); await this.policy(s, input); await this.save(s); return json({ ok: true });
+      }
       if (path === '/clawbot/refresh') {
         const s = await this.load(); await this.refresh(s); return json(clawbotStatus(s, this.clock()));
       }

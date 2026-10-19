@@ -35,7 +35,7 @@ export async function api(profile, path, body, fetcher = systemFetch) {
   let response;
   try {
     response = await fetcher(workerUrl(profile.url) + path, {
-      method: ['/status', '/settings', '/clawbot/status'].includes(path) && body === undefined ? 'GET' : 'POST',
+      method: ['/status', '/settings', '/channels', '/clawbot/status'].includes(path) && body === undefined ? 'GET' : 'POST',
       headers: { Authorization: `Bearer ${profile.admin}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(30000), redirect: 'error',
@@ -61,7 +61,11 @@ export async function api(profile, path, body, fetcher = systemFetch) {
       unauthorized: '管理凭据不匹配。请回到菜单，选择重新接管工具或导入原管理密钥。',
       test_rate_limited: '测试通知每分钟最多一条，请一分钟后重试。',
       invalid_settings: '提醒选项无效，请重新选择。',
-      not_found: '云端版本尚不支持此功能，请先从主菜单选择“更新云端程序（保留绑定）”。',
+      not_found: '云端版本尚不支持此功能，请从“更多 → 检查更新”更新云端程序。',
+      invalid_channels: '通知开关无效，请重新选择。',
+      service_not_configured: '服务号尚未绑定，请在“通知设置 → 服务号”中配置。',
+      service_disabled: '服务号提醒已关闭，请先在通知设置中开启。',
+      policy_sync_failed: '通知设置已保存，聊天通道同步暂时失败，请重试此操作；系统也会在下次检查时同步。',
       clawbot_reply_required: '聊天会话已过期或额度用尽。请向微信 ClawBot 回复一句话，再选择刷新会话状态。',
       clawbot_login_expired: 'ClawBot 登录已失效，请重新扫码绑定。',
       clawbot_disabled: '聊天提醒尚未开启，请先扫码绑定。',

@@ -17,6 +17,7 @@ test('Windows transport preserves auth/body/HTTP errors without putting secrets 
     let body = '';
     for await (const chunk of req) body += chunk.toString('utf8');
     received = { auth: req.headers.authorization, body: JSON.parse(body) };
+    assert.equal(req.headers.accept, 'application/json');
     res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ error: 'unauthorized', note: '中文响应' }));
   });
@@ -25,7 +26,7 @@ test('Windows transport preserves auth/body/HTTP errors without putting secrets 
   try {
     const marker = 'synthetic-admin-not-a-real-secret';
     const response = await windowsFetch(address + '/status', {
-      method: 'POST', headers: { Authorization: 'Bearer ' + marker, 'Content-Type': 'application/json' },
+      method: 'POST', headers: { Authorization: 'Bearer ' + marker, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ message: '中文消息' }),
     }, { spawnProcess: (command, args, options) => {
       assert.ok(!args.join(' ').includes(marker));

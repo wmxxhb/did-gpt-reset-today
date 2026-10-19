@@ -3,11 +3,15 @@ import { dirname, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { UI } from './lib/ui.mjs';
-import { api as requestApi, statusLines, workerUrl, deploymentUrl } from './lib/client.mjs';
+import { api as requestApi, workerUrl, deploymentUrl } from './lib/client.mjs';
 import { saveProfile, loadProfile } from './lib/profile.mjs';
 import { deploy, wrangler } from './lib/cloud.mjs';
-import { manageClawbot, chatStatusLines } from './lib/clawbot.mjs';
+import { manageClawbot, bindClawbot } from './lib/clawbot.mjs';
 import { testService, testNotificationChannels } from './lib/notification-tests.mjs';
+import { homeLines, activityLines } from './lib/presentation.mjs';
+import { latestVersion, newer, updateLocal, REPOSITORY } from './lib/updates.mjs';
+import { VERSION } from '../src/version.mjs';
+import { RECOMMENDED_SETTINGS } from '../src/settings.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ui = new UI();
@@ -17,7 +21,8 @@ const REQUEST_LABELS = {
   '/status': '正在连接云端并检查状态', '/settings': '正在读取或保存提醒选项',
   '/test': '正在提交服务号测试通知', '/confirm-test': '正在保存你的送达确认',
   '/check': '正在检查最新公告', '/pause': '正在暂停提醒', '/resume': '正在恢复提醒',
-  '/reset-test': '正在更新微信验证状态',
+  '/reset-test': '正在更新微信验证状态', '/channels': '正在保存通知开关',
+  '/clawbot/toggle': '正在切换聊天提醒',
   '/clawbot/login/start': '正在生成微信聊天绑定二维码', '/clawbot/login/poll': '正在等待手机扫码确认',
   '/clawbot/status': '正在读取聊天通道状态', '/clawbot/refresh': '正在同步你发给 ClawBot 的消息',
   '/clawbot/test': '正在提交聊天测试通知', '/clawbot/confirm-test': '正在记录聊天送达确认',
@@ -41,7 +46,7 @@ async function askUrl(detected) {
 }
 
 async function selectPush() {
-  const answer = await ui.choose('微信通知用哪个通道？', {
+  const answer = await ui.choose('选择服务号提供商', {
     1: '虾推啥：免费微信通道，关注公众号即可取 token（推荐）',
     2: 'pushplus：适合已有账号，服务商可能收实名费用', 0: '返回',
   }, '1');
@@ -79,19 +84,59 @@ async function chooseSettings() {
   return banked === '0' ? null : { alerts: { 1: 'both', 2: 'completed', 3: 'all' }[alerts], banked: banked === '2' };
 }
 
-async function testPhone() {
-  return testService(ui, (path, body) => api(profile, path, body));
+const accountApi = (path, body) => api(profile, path, body);
+
+async function readOverview() {
+  const [primary, chat] = await ui.task('正在读取最新动态和通知状态', () => Promise.allSettled([
+    requestApi(profile, '/status'), requestApi(profile, '/clawbot/status'),
+  ]));
+  if (primary.status !== 'fulfilled') throw primary.reason;
+  return { status: primary.value, chat: chat.status === 'fulfilled' ? chat.value : null };
 }
 
 async function showStatus() {
-  const status = await api(profile, '/status');
-  console.log('\n' + statusLines(status).join('\n'));
-  console.log('工具地址：' + profile.url);
-  try { console.log(chatStatusLines(await api(profile, '/clawbot/status')).join('\n')); }
-  catch (error) {
-    console.log(error.code === 'not_found' ? '聊天提醒：云端版本尚不支持，可从菜单更新后开启。' : '聊天通道状态暂时无法读取。');
-  }
+  const { status, chat } = await readOverview();
+  console.log(homeLines(status, chat).join('\n'));
+  if (!status.version || newer(VERSION, status.version)) console.log('有可用的云端更新，请进入“更多 → 检查更新”。');
+  if (profile.setup) console.log('首次设置尚未完成，可从“更多 → 继续开通”接着处理。');
   return status;
+}
+
+async function bindService(test = true) {
+  const push = await selectPush();
+  if (!push) return false;
+  await wrangler(root, ['secret', 'bulk'], { ui, input: JSON.stringify({
+    PUSH_PROVIDER: push.provider, [push.provider === 'xtuis' ? 'XTUIS_TOKEN' : 'PUSHPLUS_TOKEN']: push.token,
+  }) });
+  profile.provider = push.provider; await remember(profile);
+  await accountApi('/channels', { serviceEnabled: true });
+  await accountApi('/reset-test', {});
+  if (test) await testService(ui, accountApi);
+  return true;
+}
+
+async function notificationSettings() {
+  while (true) {
+    const { status, chat } = await readOverview();
+    const service = status.service || { enabled: true, configured: true };
+    const answer = await ui.choose('通知设置：两个通道独立开关，均开启时同时发送。', {
+      1: `服务号：${service.enabled ? '开启' : '关闭'}${service.configured ? '' : '（未绑定）'}`,
+      2: `聊天提醒：${chat?.enabled ? '开启' : '关闭'}${chat?.state === 'needs_reply' || chat?.state === 'quota_exhausted' ? '（请回复一句话续期）' : ''}`,
+      0: '返回首页',
+    });
+    if (answer === '0') return;
+    if (answer === '2') { await manageClawbot(ui, accountApi); continue; }
+    const choice = await ui.choose('服务号提醒', {
+      1: service.enabled ? '关闭服务号提醒（保留绑定）' : service.configured ? '开启服务号提醒' : '绑定并开启服务号提醒',
+      2: '更换绑定', ...(service.enabled ? { 3: '发送服务号测试通知' } : {}), 0: '返回通知设置',
+    });
+    if (choice === '1') {
+      if (!service.enabled && !service.configured) await bindService();
+      else await accountApi('/channels', { serviceEnabled: !service.enabled });
+    }
+    if (choice === '2') await bindService();
+    if (choice === '3') await testService(ui, accountApi);
+  }
 }
 
 async function importService() {
@@ -124,117 +169,165 @@ async function importService() {
   console.log('已连接现有工具，并加密保存本机管理凭据。');
 }
 
-async function openService(takeover = false) {
-  if (takeover) {
-    const confirm = await ui.choose('接管会更新云端程序，并生成本机管理凭据。原管理密钥将失效；微信绑定和监控记录会保留。', {
-      1: '继续自动接管（无需找回原密钥）', 2: '改用原密钥导入，保留旧管理权限', 0: '返回',
-    }, '1');
-    if (confirm === '0') return;
-    if (confirm === '2') return importService();
+async function continueSetup() {
+  const setup = profile.setup;
+  if (!setup) return;
+  if (setup.secrets) {
+    await wrangler(root, ['secret', 'bulk'], { ui, input: JSON.stringify(setup.secrets) });
+    delete setup.secrets; setup.phase = 'settings'; await remember(profile);
   }
-  const push = takeover ? null : await selectPush();
-  if (!takeover && !push) return;
-  let contact;
-  if (!takeover) {
-    console.log('\n数据站要求请求中附一个联系方式，仅用于标识数据接口使用者。');
-    while (true) {
-      contact = await ui.ask('填写你的联系邮箱或项目 HTTPS 地址：');
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact) || /^https:\/\/[^\s]+$/.test(contact)) break;
-      console.log('请填写有效邮箱或 HTTPS 地址。');
+  // Credentials are saved before network calls, so failures can resume this step.
+  for (let attempt = 0; ; attempt++) {
+    try { await accountApi('/status'); break; }
+    catch (error) {
+      if (attempt >= 3) throw error;
+      await ui.task('等待云端生效，5 秒后重试', () => new Promise(done => setTimeout(done, 5000)));
     }
   }
-  const settings = takeover ? null : await chooseSettings();
-  if (!takeover && !settings) return;
-  const go = await ui.choose(`准备${takeover ? '接管' : '开通'}：每两分钟云端检查，不需要购买域名或服务器。`, {
-    1: '开始；浏览器打开后按提示登录并授权 Cloudflare', 0: '返回，不进行云端操作',
-  }, '1');
-  if (go === '0') return;
+  if (setup.takeover) { delete profile.setup; await remember(profile); return; }
+  if (setup.phase === 'settings') {
+    await accountApi('/channels', { serviceEnabled: setup.service });
+    await accountApi('/settings', RECOMMENDED_SETTINGS);
+    await accountApi('/check', {});
+    setup.phase = 'binding'; await remember(profile);
+  }
+  if (setup.phase === 'binding') {
+    if (setup.chat) {
+      const chat = await accountApi('/clawbot/status');
+      if (!chat.configured && !(await bindClawbot(ui, accountApi, { testAfter: false }))) return;
+      if (chat.configured && !chat.enabled) await accountApi('/clawbot/toggle', { enabled: true });
+    }
+    setup.phase = 'test'; await remember(profile);
+  }
+  if (setup.service || setup.chat) await testNotificationChannels(ui, accountApi);
+  delete profile.setup; await remember(profile);
+  console.log('开通流程已完成。是否实际收到，以各通道的手机测试确认为准。电脑关机后仍会在云端运行。');
+}
+
+async function openService(takeover = false) {
+  if (takeover) {
+    const choice = await ui.choose('恢复管理权限会更新云端并使原管理密钥失效，已有绑定和记录保留。', {
+      1: '继续恢复管理权限', 2: '改用原网址和密钥连接', 0: '返回',
+    });
+    if (choice === '0') return;
+    if (choice === '2') return importService();
+  }
+  let mode, push;
+  if (!takeover) {
+    mode = await ui.choose('希望如何接收重置提醒？', {
+      1: '服务号：维护操作少，提醒可能被微信折叠',
+      2: '聊天提醒：扫码绑定 ClawBot，需要定期回复续期',
+      3: '两种都开启：同时收到两份通知', 4: '先只看动态，不开启通知', 0: '返回',
+    });
+    if (mode === '0') return;
+    if (['1', '3'].includes(mode)) { push = await selectPush(); if (!push) return; }
+  }
+  if (await ui.choose('云端每两分钟检查。默认提醒预告和完成，可稍后修改。', {
+    1: '开始，按浏览器提示登录 Cloudflare', 0: '返回',
+  }, '1') === '0') return;
   await wrangler(root, ['login'], { ui });
   const url = await askUrl(await deploy(root, ui));
   const admin = randomBytes(32).toString('hex');
   const secrets = { ADMIN_TOKEN: admin };
+  if (!takeover) secrets.SOURCE_USER_AGENT = `DidGPTResetToday/${VERSION} (+${REPOSITORY})`;
   if (push) {
     secrets.PUSH_PROVIDER = push.provider;
     secrets[push.provider === 'xtuis' ? 'XTUIS_TOKEN' : 'PUSHPLUS_TOKEN'] = push.token;
-    secrets.SOURCE_USER_AGENT = `DidGPTResetToday/0.1 (+${contact.includes('@') ? 'mailto:' : ''}${contact})`;
   }
-  console.log('\n正在保存云端绑定和本机管理凭据，不需要手动复制密钥……');
-  await wrangler(root, ['secret', 'bulk'], { ui, input: JSON.stringify(secrets) });
-  profile = { url, admin, provider: push?.provider || 'existing', contact, createdAt: Date.now() };
+  profile = { url, admin, provider: push?.provider || 'existing', createdAt: Date.now(),
+    setup: { takeover, service: ['1', '3'].includes(mode), chat: ['2', '3'].includes(mode), secrets, phase: 'secrets' } };
   await remember(profile);
-  console.log('已用当前 Windows 账号加密保存管理凭据。');
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try { await api(profile, '/status'); break; }
-    catch (error) {
-      if (attempt === 5) throw error;
-      console.log('正在等待云端配置生效……本机凭据已保存，之后可直接从菜单重试。');
-      await ui.task('等待云端配置生效，5 秒后自动重试', () => new Promise(resolveWait => setTimeout(resolveWait, 5000)));
-    }
+  await continueSetup();
+}
+
+async function checkUpdates() {
+  const status = await accountApi('/status');
+  console.log(`本机版本：${VERSION}；云端版本：${status.version || '早期版本'}`);
+  let latest;
+  try {
+    latest = await ui.task('正在检查 GitHub 更新', () => latestVersion());
+    console.log(`公开版本：${latest.version}`);
+  } catch (error) { console.log(error.message); }
+  const localUpdate = latest && newer(latest.version, VERSION);
+  const choice = await ui.choose('更新会保留通知绑定和提醒设置。', {
+    ...(localUpdate ? { 1: '更新本机工具，完成后重新打开' } : {}),
+    2: '更新云端程序（使用当前本机版本）', 0: '返回',
+  }, localUpdate ? '1' : '0');
+  if (choice === '1') {
+    await ui.task('正在更新本机文件，保留原有配置', () => updateLocal(root, latest.sha), { inline: false });
+    console.log('本机已更新。请关闭并重新双击“打开工具.cmd”，再进入“更多 → 检查更新”更新云端。');
+    return 'restart';
   }
-  if (settings) await api(profile, '/settings', settings);
-  await api(profile, '/check', {});
-  await showStatus();
-  await testPhone();
+  if (choice === '2') {
+    if (status.version && newer(status.version, VERSION)) throw new Error('云端版本更新，请先更新本机工具，避免覆盖成旧版本。');
+    const url = await deploy(root, ui);
+    if (url && url !== profile.url) throw new Error('部署账号与原工具不同，请登录原 Cloudflare 账号后重试。');
+    console.log('云端已更新，绑定和设置已保留。');
+  }
+}
+
+async function moreSettings() {
+  while (true) {
+    const answer = await ui.choose('更多', {
+      1: '提醒内容（预告、完成与可储备重置）', 2: '检查更新',
+      3: '连接其他已有工具', 4: '恢复管理权限（原管理密钥将失效）',
+      5: '诊断信息', ...(profile.setup ? { 6: '继续开通' } : {}), 0: '返回首页',
+    });
+    if (answer === '0') return;
+    if (answer === '1') { const settings = await chooseSettings(); if (settings) await accountApi('/settings', settings); }
+    if (answer === '2' && await checkUpdates() === 'restart') return 'restart';
+    if (answer === '3') { await importService(); return; }
+    if (answer === '4') { await openService(true); return; }
+    if (answer === '5') {
+      const { status, chat } = await readOverview();
+      console.log(JSON.stringify({ localVersion: VERSION, cloudVersion: status.version,
+        sourceError: status.sourceError, lastCheck: status.lastCheck, service: status.service,
+        chat: chat && { state: chat.state, lastError: chat.lastError, pending: chat.pending },
+        chatEnqueueError: status.clawbotEnqueueError }, null, 2));
+    }
+    if (answer === '6') await continueSetup();
+  }
 }
 
 async function main() {
-  console.log('\nGPT今天重置了吗？ · 中文管理向导');
-  console.log('输入编号即可操作，不需要拼网址或测试命令。');
+  console.log('GPT今天重置了吗？ · 打开看动态，开启通知后可关闭电脑。');
   try { profile = await ui.task('正在读取本机配置', () => loadProfile(root)); } catch (error) { console.log(error.message); }
+  if (profile?.setup && await ui.choose('上次开通尚未完成，已保存进度。', { 1: '接着完成', 0: '稍后处理' }, '1') === '1') {
+    try { await continueSetup(); } catch (error) { console.log(error.message); }
+  }
   while (true) {
     try {
       if (!profile) {
-        const answer = await ui.choose('欢迎使用。你现在属于哪种情况？', {
-          1: '第一次使用：开通微信提醒',
-          2: '已经开通：更新并自动接管（旧管理密钥将失效）',
-          3: '已经开通：输入原网址和管理密钥连接', 0: '退出',
-        });
-        if (answer === '0') return;
-        if (answer === '1') await openService();
-        if (answer === '2') await openService(true);
-        if (answer === '3') await importService();
+        const choice = await ui.choose('欢迎使用', { 1: '第一次使用，开始设置', 2: '连接已有工具', 3: '恢复管理权限', 0: '退出' });
+        if (choice === '0') return;
+        if (choice === '1') await openService();
+        if (choice === '2') await importService();
+        if (choice === '3') await openService(true);
         continue;
       }
-      const answer = await ui.choose('选择你要做的事', {
-        1: '查看运行状态', 2: '发送测试通知（选择通道）', 3: '选择提醒内容',
-        4: '暂停 / 恢复提醒', 5: '更换服务号微信绑定', 6: '更新云端程序（保留绑定）',
-        7: '重新接管管理权限（旧管理密钥将失效）', 0: '退出，云端监控继续运行',
-        8: '微信聊天提醒（ClawBot，可选）',
-      }, '1');
+      let status;
+      try { status = await showStatus(); }
+      catch (error) { console.log('首页暂时无法更新：' + error.message); }
+      const answer = await ui.choose('选择操作', {
+        1: '查看最近动态', 2: '通知设置', 3: '发送测试通知',
+        4: status?.paused ? '恢复通知' : '暂停通知', 5: '更多', 0: '退出，云端继续运行',
+      });
       if (answer === '0') return;
-      if (answer === '1') await showStatus();
-      if (answer === '2') await testNotificationChannels(ui, (path, body) => api(profile, path, body));
-      if (answer === '3') {
-        const settings = await chooseSettings();
-        if (settings) { await api(profile, '/settings', settings); console.log('提醒选项已生效。'); }
+      if (answer === '1') {
+        const result = await readOverview(); console.log(activityLines(result.status, result.chat).join('\n'));
       }
+      if (answer === '2') await notificationSettings();
+      if (answer === '3') await testNotificationChannels(ui, accountApi);
       if (answer === '4') {
-        const status = await api(profile, '/status');
-        const choice = await ui.choose(status.paused ? '提醒当前已暂停。' : '提醒当前正在运行。', {
-          1: status.paused ? '恢复提醒' : '暂停提醒', 0: '返回，不修改',
-        }, '1');
-        if (choice === '1') { await api(profile, status.paused ? '/resume' : '/pause', {}); console.log(status.paused ? '提醒已恢复。' : '提醒已暂停。'); }
+        const current = await accountApi('/status');
+        if (await ui.choose(current.paused ? '恢复后只通知新的动态。' : '暂停后仍更新动态，但不发送通知；暂停期间的消息不会补发。', {
+          1: current.paused ? '恢复通知' : '暂停通知', 0: '返回',
+        }, '1') === '1') await accountApi(current.paused ? '/resume' : '/pause', {});
       }
-      if (answer === '5') {
-        const push = await selectPush();
-        if (push) {
-          await wrangler(root, ['secret', 'bulk'], { ui, input: JSON.stringify({
-            PUSH_PROVIDER: push.provider, [push.provider === 'xtuis' ? 'XTUIS_TOKEN' : 'PUSHPLUS_TOKEN']: push.token,
-          }) });
-          profile.provider = push.provider; await remember(profile);
-          await api(profile, '/reset-test', {}); await testPhone();
-        }
-      }
-      if (answer === '6') {
-        const url = await deploy(root, ui);
-        if (url && url !== profile.url) throw new Error('此次部署地址与原工具不同。可能登录了另一个 Cloudflare 账号；本机仍保留原工具配置，请登录原账号后重试。');
-        await showStatus();
-      }
-      if (answer === '7') await openService(true);
-      if (answer === '8') await manageClawbot(ui, (path, body) => api(profile, path, body));
+      if (answer === '5' && await moreSettings() === 'restart') return;
     } catch (error) {
-      console.log('\n这一步尚未完成：' + error.message);
-      console.log('可从菜单选择重试；不需要重新注册微信推送账号。');
+      console.log('这一步尚未完成：' + error.message);
+      console.log('已有配置已保留，可以重试；首次设置中断时可从“更多 → 继续开通”恢复。');
     }
   }
 }

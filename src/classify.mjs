@@ -53,9 +53,8 @@ function notification(id, stage, text, at, url, evidence) {
   return {
     // A source upgrade from preview to completion must produce a second alert.
     key: `${id}:${stage === 'observed' ? 'completed' : stage}`,
-    id, stage, at, title: TITLE[stage],
-    content: [TITLE[stage], '', `发布时间：${chinaTime(at)}`, evidence, '',
-      String(text).slice(0, 3500), '', caveat,
+    id, stage, at, title: TITLE[stage], url, text: String(text).slice(0, 3500), evidence,
+    content: [String(text).slice(0, 3500), '', `发布时间：${chinaTime(at)}`, evidence, '', caveat,
       '原帖中的 today/tomorrow 按作者当地语境理解，不自动当作北京时间今天。',
       url ? `原帖：${url}` : '本条无直接原帖链接，请核对监测站记录。',
       `Data: ${SOURCE}`].join('\n'),

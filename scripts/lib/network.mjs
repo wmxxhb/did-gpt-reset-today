@@ -13,12 +13,15 @@ $payload=$serializer.DeserializeObject([Console]::In.ReadToEnd())
 $request=[Net.HttpWebRequest]::Create($payload['url'])
 $request.Method=$payload['method']
 $request.AllowAutoRedirect=$false
+$request.ServicePoint.Expect100Continue=$false
 $request.Timeout=[int]$payload['timeout']
 $request.ReadWriteTimeout=[int]$payload['timeout']
 $request.AutomaticDecompression=[Net.DecompressionMethods]::GZip -bor [Net.DecompressionMethods]::Deflate
 $request.UserAgent='DidGPTResetToday/0.1 (Windows)'
 foreach($key in $payload['headers'].Keys) {
   if($key -ieq 'Content-Type') { $request.ContentType=$payload['headers'][$key] }
+  elseif($key -ieq 'Accept') { $request.Accept=$payload['headers'][$key] }
+  elseif($key -ieq 'User-Agent') { $request.UserAgent=$payload['headers'][$key] }
   else { $request.Headers[$key]=$payload['headers'][$key] }
 }
 if($null -ne $payload['body']) {

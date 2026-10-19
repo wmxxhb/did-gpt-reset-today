@@ -86,6 +86,32 @@ export function emptyState() {
     lastCheck: null, lastSuccess: null, lastError: null, failures: 0, nextFetch: 0 };
 }
 
+export function serviceChannel(s, env) {
+  const configured = !!(env.PUSH_PROVIDER === 'pushplus' ? env.PUSHPLUS_TOKEN
+    : env.PUSH_PROVIDER === 'xtuis' ? env.XTUIS_TOKEN : env.XTUIS_TOKEN || env.PUSHPLUS_TOKEN);
+  return { enabled: s.serviceEnabled ?? configured, configured,
+    lastTest: s.lastTestResult || null, pending: s.queue.length,
+    error: s.queue.find(q => q.lastError)?.lastError || (s.lastTestResult?.status === 'failed' ? s.lastTestResult.reason : null) };
+}
+
+function activity(s, item, status) {
+  s.activity ||= [];
+  let row = s.activity.find(row => row.key === item.key);
+  if (!row) {
+    row = { key: item.key, stage: item.stage, title: item.title, at: item.at, url: item.url || null,
+      text: item.text || '', evidence: item.evidence || '' };
+    s.activity.push(row);
+  } else {
+    Object.assign(row, { stage: item.stage, title: item.title, at: item.at,
+      url: item.url || null, text: item.text || '', evidence: item.evidence || '' });
+  }
+  if (status) row.service = status;
+  const stages = { planned: 1, rolling: 2, observed: 3, completed: 4, banked: 0 };
+  s.activity.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || stages[b.stage] - stages[a.stage]);
+  s.activity = s.activity.slice(0, 40);
+  return row;
+}
+
 export function safeError(error) {
   const m = String(error?.message || 'unknown_error');
   return /^(http_\d+|source_[a-z_]+|missing_[a-z_]+|pushplus_code_[a-z0-9_]+|xtuis_[a-z_]+|xtuis_code_-?\d+|unsupported_push_provider|network_timeout|network_connection_failed|response_not_json)$/.test(m) ? m : 'network_or_runtime_error';
@@ -101,7 +127,6 @@ export class Monitor {
   async check() {
     const s = await this.load();
     const now = this.clock();
-    if (s.paused) return s;
     s.lastCheck = now;
     if (now >= s.nextFetch) {
       try {
@@ -114,14 +139,20 @@ export class Monitor {
         const hours = Number(this.env.MAX_AGE_HOURS || 72);
         if (!Number.isFinite(hours) || hours < 1 || hours > 168) throw new Error('source_invalid_max_age');
         for (const item of items) {
+          if (Date.parse(item.at) > now + 300000) continue;
+          const existing = s.activity?.some(row => row.key === item.key);
+          activity(s, item, existing ? undefined : 'historical');
           if (s.seen[item.key] || s.queue.some(q => q.key === item.key)) continue;
-          if (!allowsNotification(item, s.settings)) { s.seen[item.key] = now; continue; }
+          if (!allowsNotification(item, s.settings)) { activity(s, item, 'filtered'); s.seen[item.key] = now; continue; }
           const age = now - Date.parse(item.at);
           if (!s.initialized || age > hours * 3600000 || age < -300000) {
             s.seen[item.key] = now;
             continue;
           }
-          s.queue.push({ ...item, attempts: 0, nextAttempt: now });
+          if (s.paused) { activity(s, item, 'paused'); s.seen[item.key] = now; continue; }
+          if (serviceChannel(s, this.env).enabled) {
+            s.queue.push({ ...item, attempts: 0, nextAttempt: now }); activity(s, item, 'queued');
+          } else { activity(s, item, 'disabled'); s.seen[item.key] = now; }
           if (this.secondary) (s.clawbotOutbox ||= []).push({ ...item, queuedAt: now });
         }
         s.initialized = true;
@@ -138,8 +169,12 @@ export class Monitor {
     await this.save(s);
     let sent = 0;
     for (const item of [...s.queue]) {
+      if (s.paused || !serviceChannel(s, this.env).enabled) {
+        activity(s, item, s.paused ? 'paused' : 'disabled'); s.seen[item.key] = now;
+        s.queue = s.queue.filter(q => q.key !== item.key); continue;
+      }
       if (!allowsNotification(item, s.settings)) {
-        s.seen[item.key] = now;
+        s.seen[item.key] = now; activity(s, item, 'filtered');
         s.queue = s.queue.filter(q => q.key !== item.key);
         continue;
       }
@@ -150,12 +185,13 @@ export class Monitor {
         item.nextAttempt = now + Math.min(21600000, 120000 * 2 ** Math.min(item.attempts - 1, 7));
         await this.save(s);
         const receipt = await pushMessage(this.env, item, this.fetcher);
-        s.seen[item.key] = now;
+        s.seen[item.key] = now; activity(s, item, 'accepted');
         s.receipts.unshift({ key: item.key, title: item.title, acceptedAt: now, receipt, status: 'accepted' });
         s.receipts = s.receipts.slice(0, 50);
         s.queue = s.queue.filter(q => q.key !== item.key);
         sent++;
       } catch (e) {
+        activity(s, item, 'failed');
         item.lastError = safeError(e);
         if (e.retryAfterMs) item.nextAttempt = Math.max(item.nextAttempt, now + e.retryAfterMs);
         // Stop this batch on failure to avoid repeatedly hitting a blocked provider.
@@ -168,7 +204,7 @@ export class Monitor {
     for (const [key, time] of Object.entries(s.seen)) if (now - time > 90 * 86400000) delete s.seen[key];
     await this.save(s);
     if (this.secondary) {
-      s.clawbotOutbox = (s.clawbotOutbox || []).filter(item => now - item.queuedAt < 3600000 && allowsNotification(item, s.settings));
+      s.clawbotOutbox = (s.clawbotOutbox || []).filter(item => !s.paused && now - item.queuedAt < 3600000 && allowsNotification(item, s.settings));
       const batch = s.clawbotOutbox.slice(0, 20);
       if (batch.length) {
         try {

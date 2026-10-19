@@ -103,7 +103,8 @@ test('chat queue respects pause, preference changes, expiry and disabling', asyn
   }, () => now);
   await bot.enqueue([item(), { ...item('event:planned'), stage: 'planned' }]);
   await bot.tick({ paused: true, settings: { alerts: 'completed', banked: false } });
-  assert.equal(sends, 0); assert.equal((await bot.load()).queue.length, 1);
+  assert.equal(sends, 0); assert.equal((await bot.load()).queue.length, 0);
+  await bot.enqueue([item('later:completed')]);
   now += 3600001; await bot.tick(); assert.equal(sends, 0); assert.equal((await bot.load()).queue.length, 0);
   await bot.handle(request('disable')); const saved = await bot.load();
   assert.equal(saved.token, undefined); assert.equal(saved.context, undefined); assert.equal(saved.enabled, false);
@@ -183,5 +184,5 @@ test('manager uses GET for optional channel status and provides an upgrade hint 
   await api(profile, '/clawbot/status', undefined, async (_url, options) => {
     assert.equal(options.method, 'GET'); return Response.json({ state: 'disabled' });
   });
-  await assert.rejects(() => api(profile, '/clawbot/status', undefined, async () => Response.json({ error: 'not_found' }, { status: 404 })), /更新云端程序/);
+  await assert.rejects(() => api(profile, '/clawbot/status', undefined, async () => Response.json({ error: 'not_found' }, { status: 404 })), /更新云端/);
 });

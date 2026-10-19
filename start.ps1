@@ -20,13 +20,18 @@ if ($tiboMajor -lt 22) {
     }
 }
 $env:Path = (Split-Path -Parent $tiboNode) + ';' + $env:Path
-if ((-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'))) -or (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\qrcode-terminal\package.json')))) {
+$tiboLockHash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'package-lock.json') -Algorithm SHA256).Hash
+$tiboInstalledHash = Join-Path $PSScriptRoot '.tibo-local\dependency-lock.sha256'
+$tiboDependenciesMatch = (Test-Path -LiteralPath $tiboInstalledHash) -and ((Get-Content -LiteralPath $tiboInstalledHash -Raw).Trim() -eq $tiboLockHash)
+if ((-not $tiboDependenciesMatch) -or (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'))) -or (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\qrcode-terminal\package.json')))) {
     $tiboNpmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $tiboNpmCommand) { throw '未找到 npm，请安装 Node.js：https://nodejs.org/' }
     $tiboNpmCli = Join-Path (Split-Path -Parent $tiboNpmCommand.Source) 'node_modules\npm\bin\npm-cli.js'
     if (-not (Test-Path -LiteralPath $tiboNpmCli)) { throw '未找到 npm CLI，请在安装 Node.js 后重试。' }
     & $tiboNode 'scripts\install.mjs' $tiboNpmCli
     if ($LASTEXITCODE -ne 0) { throw '组件准备失败，请检查网络后重新双击打开。' }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $tiboInstalledHash) -Force | Out-Null
+    Set-Content -LiteralPath $tiboInstalledHash -Value $tiboLockHash -Encoding Ascii
 }
 & $tiboNode 'scripts\setup.mjs'
 if ($LASTEXITCODE -ne 0) { throw '部署尚未完成，请根据提示处理后重试。' }

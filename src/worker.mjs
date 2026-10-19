@@ -1,10 +1,11 @@
-import { Monitor, pushMessage, safeError } from './monitor.mjs';
+import { Monitor, pushMessage, safeError, serviceChannel } from './monitor.mjs';
 import { normalizeSettings, allowsNotification } from './settings.mjs';
 import { ClawBot } from './clawbot.mjs';
+import { VERSION } from './version.mjs';
 
 const botStub = env => env.MONITOR.get(env.MONITOR.idFromName('personal-clawbot-v1'));
 const BOT_ROUTES = ['/clawbot/status', '/clawbot/login/start', '/clawbot/login/poll',
-  '/clawbot/refresh', '/clawbot/test', '/clawbot/confirm-test', '/clawbot/disable'];
+  '/clawbot/refresh', '/clawbot/test', '/clawbot/confirm-test', '/clawbot/disable', '/clawbot/toggle'];
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 
@@ -27,14 +28,44 @@ export class ResetMonitor {
     this.tail = task.catch(() => {});
     return task;
   }
+  async savePolicy(state) {
+    state.policyRevision = (state.policyRevision || 0) + 1;
+    await this.monitor.save(state);
+    if (this.env.MONITOR) {
+      try {
+        const result = await botStub(this.env).fetch('https://monitor/clawbot/policy', { method: 'POST',
+          body: JSON.stringify({ paused: state.paused, settings: normalizeSettings(state.settings), revision: state.policyRevision }) });
+        if (!result.ok) return false;
+      } catch { return false; }
+    }
+    return true;
+  }
   async handle(request) {
     const path = new URL(request.url).pathname;
     if (path.startsWith('/clawbot/')) return this.clawbot.handle(request);
     if (path === '/check') {
       const state = await this.monitor.check();
-      return json(publicStatus(state));
+      return json(publicStatus(state, this.env));
     }
-    if (path === '/status') return json(publicStatus(await this.monitor.load()));
+    if (path === '/status') return json(publicStatus(await this.monitor.load(), this.env));
+    if (path === '/channels') {
+      const state = await this.monitor.load();
+      if (request.method === 'GET') return json({ service: serviceChannel(state, this.env) });
+      let input;
+      try { const raw = await request.text(); if (raw.length > 1024) throw new Error(); input = JSON.parse(raw); }
+      catch { return json({ error: 'invalid_channels' }, 400); }
+      if (!input || typeof input.serviceEnabled !== 'boolean') return json({ error: 'invalid_channels' }, 400);
+      if (input.serviceEnabled && !serviceChannel(state, this.env).configured) return json({ error: 'service_not_configured' }, 409);
+      state.serviceEnabled = input.serviceEnabled;
+      if (!state.serviceEnabled) {
+        for (const item of state.queue) {
+          state.seen[item.key] = Date.now();
+          const row = state.activity?.find(row => row.key === item.key); if (row) row.service = 'disabled';
+        }
+        state.queue = [];
+      }
+      await this.monitor.save(state); return json({ service: serviceChannel(state, this.env) });
+    }
     if (path === '/settings') {
       const state = await this.monitor.load();
       if (request.method === 'GET') return json(normalizeSettings(state.settings));
@@ -44,8 +75,10 @@ export class ResetMonitor {
         state.settings = normalizeSettings(JSON.parse(body));
       } catch { return json({ error: 'invalid_settings', hint: '请选择预告和完成、仅完成或全部进度，并设置可储备重置开关。' }, 400); }
       for (const item of state.queue) if (!allowsNotification(item, state.settings)) state.seen[item.key] = Date.now();
+      for (const row of state.activity || []) if (state.queue.some(q => q.key === row.key) && !allowsNotification(row, state.settings)) row.service = 'filtered';
       state.queue = state.queue.filter(item => allowsNotification(item, state.settings));
-      await this.monitor.save(state);
+      state.clawbotOutbox = (state.clawbotOutbox || []).filter(item => allowsNotification(item, state.settings));
+      if (!(await this.savePolicy(state))) return json({ error: 'policy_sync_failed' }, 503);
       return json(state.settings);
     }
     if (path === '/confirm-test') {
@@ -65,11 +98,19 @@ export class ResetMonitor {
     if (path === '/pause' || path === '/resume') {
       const state = await this.monitor.load();
       state.paused = path === '/pause';
-      await this.monitor.save(state);
-      return json(publicStatus(state));
+      if (state.paused) {
+        for (const item of state.queue) {
+          state.seen[item.key] = Date.now();
+          const row = state.activity?.find(row => row.key === item.key); if (row) row.service = 'paused';
+        }
+        state.queue = []; state.clawbotOutbox = [];
+      }
+      if (!(await this.savePolicy(state))) return json({ error: 'policy_sync_failed' }, 503);
+      return json(publicStatus(state, this.env));
     }
     if (path === '/test') {
       const state = await this.monitor.load();
+      if (state.serviceEnabled === false) return json({ error: 'service_disabled' }, 409);
       if (state.lastTest && Date.now() - state.lastTest < 60000) return json({ error: 'test_rate_limited' }, 429);
       state.lastTest = Date.now();
       await this.monitor.save(state);
@@ -92,8 +133,9 @@ export class ResetMonitor {
   }
 }
 
-function publicStatus(s) {
+function publicStatus(s, env) {
   return {
+    version: VERSION, service: serviceChannel(s, env), activity: s.activity || [], policyRevision: s.policyRevision || 0,
     initialized: s.initialized, paused: s.paused,
     lastCheck: s.lastCheck, lastSourceSuccess: s.lastSuccess, sourceError: s.lastError,
     consecutiveSourceFailures: s.failures, nextFetch: s.nextFetch,
@@ -137,7 +179,7 @@ export default {
         console.error(JSON.stringify({ sourceError: status.sourceError, pending: status.pending.length }));
       }
       const bot = await botStub(env).fetch('https://monitor/clawbot/tick', {
-        method: 'POST', body: JSON.stringify({ paused: status.paused, settings: status.settings }),
+        method: 'POST', body: JSON.stringify({ paused: status.paused, settings: status.settings, revision: status.policyRevision }),
       });
       if (!bot.ok) console.error('clawbot_tick_failed');
     }));
@@ -145,8 +187,8 @@ export default {
   async fetch(request, env) {
     if (!(await authorized(request, env.ADMIN_TOKEN))) return json({ error: 'unauthorized' }, 401);
     const path = new URL(request.url).pathname;
-    if (!['/status', '/check', '/test', '/pause', '/resume', '/settings', '/confirm-test', '/reset-test', ...BOT_ROUTES].includes(path)) return json({ error: 'not_found' }, 404);
-    const allowed = ['/status', '/clawbot/status'].includes(path) ? ['GET'] : path === '/settings' ? ['GET', 'POST'] : ['POST'];
+    if (!['/status', '/channels', '/check', '/test', '/pause', '/resume', '/settings', '/confirm-test', '/reset-test', ...BOT_ROUTES].includes(path)) return json({ error: 'not_found' }, 404);
+    const allowed = ['/status', '/clawbot/status'].includes(path) ? ['GET'] : ['/settings', '/channels'].includes(path) ? ['GET', 'POST'] : ['POST'];
     if (!allowed.includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
     if (BOT_ROUTES.includes(path)) return botStub(env).fetch(request);
     return env.MONITOR.get(env.MONITOR.idFromName('personal-monitor-v1')).fetch(request);
