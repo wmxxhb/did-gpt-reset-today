@@ -173,7 +173,8 @@ main:focus { outline: none; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 24px 0 12px; }
 .welcome-actions .button { min-height: 40px; padding: 9px 18px; font-size: 15px; }
 footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 32px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+footer > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footer-links { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
 footer a { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 footer .icon { width: 15px; height: 15px; }
 .loading { display: grid; justify-items: center; gap: 16px; padding: 72px 20px; font-size: 16px; color: var(--muted); }
@@ -253,7 +254,7 @@ dialog h2 { font-size: 21px; font-weight: 600; margin-bottom: 16px; line-height:
   .welcome-actions { flex-direction: column; }
   .welcome-actions .button { width: 100%; }
   footer { font-size: 14px; }
-  footer a { display: none; }
+  footer .source-link { display: none; }
 }
 @media (max-height: 600px) and (min-width: 681px) {
   .sidebar { grid-template-rows: 56px minmax(0, 1fr) auto; }
