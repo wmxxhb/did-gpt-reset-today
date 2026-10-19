@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { deploymentUrl } from './client.mjs';
 
 export async function wrangler(root, args, { ui, input, outputFile } = {}) {
+  if (ui?.cloud) return ui.cloud(root, args, { input, outputFile });
   const cli = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
   ui?.suspend();
   try {
@@ -29,9 +30,9 @@ export async function deploy(root, ui) {
   await mkdir(folder, { recursive: true });
   const outputFile = join(folder, 'deploy.ndjson');
   await writeFile(outputFile, '');
-  console.log('\n正在更新云端程序，已有微信绑定和提醒记录会保留。');
-  console.log('首次开通若出现英文询问：是否注册免费网址选 yes；名称填 tibo-alert-加任意数字；最后确认选 yes。');
-  console.log('这只是给免费网址起名，不需要购买域名。后续地址由向导自动识别。');
+  (ui?.log || console.log)('\n正在更新云端程序，已有微信绑定和提醒记录会保留。');
+  (ui?.log || console.log)(ui?.browser ? '首次开通如需注册免费网址，网页会提示打开 Cloudflare 页面，完成后点击继续。' : '首次开通若出现英文询问：是否注册免费网址选 yes；名称填 tibo-alert-加任意数字；最后确认选 yes。');
+  (ui?.log || console.log)('这只是给免费网址起名，不需要购买域名。后续地址由向导自动识别。');
   await wrangler(root, ['deploy'], { ui, outputFile });
   const url = deploymentUrl(await readFile(outputFile, 'utf8'));
   return url;

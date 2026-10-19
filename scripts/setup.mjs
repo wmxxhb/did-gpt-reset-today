@@ -1,2 +1,4 @@
 // Compatibility entry point for the Chinese management wizard.
-await import('./manage.mjs');
+import { createManager } from './manage.mjs';
+const manager = createManager();
+try { await manager.main(); } finally { manager.close(); }

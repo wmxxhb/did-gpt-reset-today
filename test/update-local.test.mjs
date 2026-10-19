@@ -34,11 +34,16 @@ test('ZIP updater changes runtime files while preserving private settings, Git m
     await writeFile(join(root, 'src', 'worker.mjs'), 'old-worker');
     await writeFile(join(prefix, 'package.json'), JSON.stringify({ name: 'did-gpt-reset-today', version: '0.2.0' }));
     await writeFile(join(prefix, 'src', 'worker.mjs'), 'new-worker');
+    await mkdir(join(prefix, 'web'), { recursive: true });
+    await writeFile(join(prefix, 'web', 'index.html'), '<html>updated-web</html>');
+    await writeFile(join(prefix, 'THIRD_PARTY_NOTICES.md'), 'synthetic-license-notice');
     await writeFile(join(prefix, '.tibo-local', 'profile.dat'), 'must-not-copy');
     const zip = join(folder, 'fixture.zip'); await createZip(source, zip);
     await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helper,
       '-Root', root, '-Commit', sha, '-SourceArchive', zip], { windowsHide: true });
     assert.equal(await readFile(join(root, 'src', 'worker.mjs'), 'utf8'), 'new-worker');
+    assert.equal(await readFile(join(root, 'web', 'index.html'), 'utf8'), '<html>updated-web</html>');
+    assert.equal(await readFile(join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'synthetic-license-notice');
     assert.equal(await readFile(join(root, '.tibo-local', 'profile.dat'), 'utf8'), 'synthetic-private-profile');
     assert.equal(await readFile(join(root, '.git', 'marker'), 'utf8'), 'synthetic-git-metadata');
     assert.equal(await readFile(join(root, 'personal.txt'), 'utf8'), 'keep-personal-file');

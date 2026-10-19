@@ -27,7 +27,7 @@ try {
       if (!$taskRelative -or $taskRelative.EndsWith('/')) { continue }
       if ($taskRelative -match '\\|(^|/)\.\.?(/|$)|:') { throw 'Unsafe archive entry' }
       # Only update public runtime files. Private settings and Git metadata are never copied.
-      if ($taskRelative -notmatch '^(src/|scripts/|package\.json$|package-lock\.json$|README\.md$|SECURITY\.md$|start\.ps1$|wrangler\.jsonc$)' -and $taskRelative -notmatch '\.(cmd|txt|ps1)$') { continue }
+      if ($taskRelative -notmatch '^(src/|scripts/|web/|package\.json$|package-lock\.json$|README\.md$|SECURITY\.md$|THIRD_PARTY_NOTICES\.md$|start\.ps1$|wrangler\.jsonc$)' -and $taskRelative -notmatch '\.(cmd|txt|ps1)$') { continue }
       if ($taskRelative -match '(^|/)\.') { continue }
       $taskTarget = [IO.Path]::GetFullPath((Join-Path $taskRootPath $taskRelative))
       if (!$taskTarget.StartsWith($taskRootPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe target' }

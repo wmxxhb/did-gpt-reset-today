@@ -6,16 +6,19 @@ import { UI } from './lib/ui.mjs';
 import { api as requestApi, workerUrl, deploymentUrl } from './lib/client.mjs';
 import { saveProfile, loadProfile } from './lib/profile.mjs';
 import { deploy, wrangler } from './lib/cloud.mjs';
-import { manageClawbot, bindClawbot } from './lib/clawbot.mjs';
+import { manageClawbot, bindClawbot, testClawbot } from './lib/clawbot.mjs';
 import { testService, testNotificationChannels } from './lib/notification-tests.mjs';
 import { homeLines, activityLines } from './lib/presentation.mjs';
 import { latestVersion, newer, updateLocal, REPOSITORY } from './lib/updates.mjs';
 import { VERSION } from '../src/version.mjs';
 import { RECOMMENDED_SETTINGS } from '../src/settings.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ui = new UI();
+const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Both front ends use these same workflows, credentials and remote operations.
+export function createManager({ root = defaultRoot, ui = new UI(), client = requestApi, readProfile = loadProfile, writeProfile = saveProfile } = {}) {
 let profile;
+const log = (...args) => ui.log ? ui.log(...args) : console.log(...args);
 
 const REQUEST_LABELS = {
   '/status': '正在连接云端并检查状态', '/settings': '正在读取或保存提醒选项',
@@ -29,19 +32,19 @@ const REQUEST_LABELS = {
   '/clawbot/disable': '正在关闭并清除聊天绑定',
 };
 function api(account, path, body) {
-  return ui.task(REQUEST_LABELS[path] || '正在连接云端', () => requestApi(account, path, body), { timeoutMs: 30000 });
+  return ui.task(REQUEST_LABELS[path] || '正在连接云端', () => client(account, path, body), { timeoutMs: 30000 });
 }
 
 function remember(account) {
-  return ui.task('正在加密保存本机管理凭据', () => saveProfile(root, account));
+  return ui.task('正在加密保存本机管理凭据', () => writeProfile(root, account));
 }
 
 async function askUrl(detected) {
   if (detected) return detected;
-  console.log('请复制部署输出的网址；只复制账号子域名也可以，向导会补全。');
+  log('请复制部署输出的网址；只复制账号子域名也可以，向导会补全。');
   while (true) {
     try { return workerUrl(await ui.ask('网址：')); }
-    catch (e) { console.log(e.message); }
+    catch (e) { log(e.message); }
   }
 }
 
@@ -52,10 +55,10 @@ async function selectPush() {
   }, '1');
   if (answer === '0') return null;
   const provider = answer === '1' ? 'xtuis' : 'pushplus';
-  console.log(provider === 'xtuis'
+  log(provider === 'xtuis'
     ? '\n打开 https://xtuis.cn/，微信扫码关注公众号，复制 token。不要选择付费升级版。'
     : '\n打开 https://www.pushplus.plus/，复制消息 token。');
-  console.log('下面输入不显示内容。只在本机填写，不需要发送给任何人。');
+  log('下面输入不显示内容。只在本机填写，不需要发送给任何人。');
   while (true) {
     let token = await ui.ask('粘贴公众号提供的 token（输入 0 返回）：', true);
     if (token === '0') return null;
@@ -64,9 +67,9 @@ async function selectPush() {
         const u = new URL(token);
         if (u.hostname !== 'wx.xtuis.cn' || !/^\/[^/]+\.send$/.test(u.pathname)) throw new Error();
         token = decodeURIComponent(u.pathname.slice(1, -5));
-      } catch { console.log('这个链接无法识别，请复制公众号中的 token 本身。'); continue; }
+      } catch { log('这个链接无法识别，请复制公众号中的 token 本身。'); continue; }
     }
-    if (!token || /\s|[/:?#]/.test(token)) { console.log('token 格式不正确，请重新复制，不要附带说明文字。'); continue; }
+    if (!token || /\s|[/:?#]/.test(token)) { log('token 格式不正确，请重新复制，不要附带说明文字。'); continue; }
     return { provider, token };
   }
 }
@@ -88,7 +91,7 @@ const accountApi = (path, body) => api(profile, path, body);
 
 async function readOverview() {
   const [primary, chat] = await ui.task('正在读取最新动态和通知状态', () => Promise.allSettled([
-    requestApi(profile, '/status'), requestApi(profile, '/clawbot/status'),
+    client(profile, '/status'), client(profile, '/clawbot/status'),
   ]));
   if (primary.status !== 'fulfilled') throw primary.reason;
   return { status: primary.value, chat: chat.status === 'fulfilled' ? chat.value : null };
@@ -96,9 +99,9 @@ async function readOverview() {
 
 async function showStatus() {
   const { status, chat } = await readOverview();
-  console.log(homeLines(status, chat).join('\n'));
-  if (!status.version || newer(VERSION, status.version)) console.log('有可用的云端更新，请进入“更多 → 检查更新”。');
-  if (profile.setup) console.log('首次设置尚未完成，可从“更多 → 继续开通”接着处理。');
+  log(homeLines(status, chat).join('\n'));
+  if (!status.version || newer(VERSION, status.version)) log('有可用的云端更新，请进入“更多 → 检查更新”。');
+  if (profile.setup) log('首次设置尚未完成，可从“更多 → 继续开通”接着处理。');
   return status;
 }
 
@@ -143,14 +146,14 @@ async function importService() {
   let detected;
   try { detected = deploymentUrl(await readFile(resolve(root, '.tibo-local/deploy.ndjson'), 'utf8')); } catch { /* New machine: ask once. */ }
   const url = await askUrl(detected);
-  console.log('连接工具：' + url);
+  log('连接工具：' + url);
   let admin = await ui.ask('粘贴原管理密钥（输入隐藏，只需这一次）：', true);
   if (admin.length < 32) throw new Error('管理密钥不完整，请重新复制。');
   const candidate = { url, admin, provider: 'existing', createdAt: Date.now() };
   while (true) {
     try { await api(candidate, '/status'); break; }
     catch (error) {
-      console.log('\n' + error.message);
+      log('\n' + error.message);
       const choice = await ui.choose('选择下一步，当前输入会保留在本次操作中：', {
         1: '直接重试，不重新输入密钥', 2: '重新填写管理密钥', 0: '返回，取消本次连接',
       }, error.code === 'unauthorized' ? '2' : '1');
@@ -158,7 +161,7 @@ async function importService() {
       if (choice === '2') {
         do {
           admin = await ui.ask('粘贴原管理密钥（输入隐藏）：', true);
-          if (admin.length < 32) console.log('管理密钥不完整，请重新填写。');
+          if (admin.length < 32) log('管理密钥不完整，请重新填写。');
         } while (admin.length < 32);
         candidate.admin = admin;
       }
@@ -166,7 +169,7 @@ async function importService() {
   }
   await remember(candidate);
   profile = candidate;
-  console.log('已连接现有工具，并加密保存本机管理凭据。');
+  log('已连接现有工具，并加密保存本机管理凭据。');
 }
 
 async function continueSetup() {
@@ -201,7 +204,7 @@ async function continueSetup() {
   }
   if (setup.service || setup.chat) await testNotificationChannels(ui, accountApi);
   delete profile.setup; await remember(profile);
-  console.log('开通流程已完成。是否实际收到，以各通道的手机测试确认为准。电脑关机后仍会在云端运行。');
+  log('开通流程已完成。是否实际收到，以各通道的手机测试确认为准。电脑关机后仍会在云端运行。');
 }
 
 async function openService(takeover = false) {
@@ -242,12 +245,12 @@ async function openService(takeover = false) {
 
 async function checkUpdates() {
   const status = await accountApi('/status');
-  console.log(`本机版本：${VERSION}；云端版本：${status.version || '早期版本'}`);
+  log(`本机版本：${VERSION}；云端版本：${status.version || '早期版本'}`);
   let latest;
   try {
     latest = await ui.task('正在检查 GitHub 更新', () => latestVersion());
-    console.log(`公开版本：${latest.version}`);
-  } catch (error) { console.log(error.message); }
+    log(`公开版本：${latest.version}`);
+  } catch (error) { log(error.message); }
   const localUpdate = latest && newer(latest.version, VERSION);
   const choice = await ui.choose('更新会保留通知绑定和提醒设置。', {
     ...(localUpdate ? { 1: '更新本机工具，完成后重新打开' } : {}),
@@ -255,14 +258,14 @@ async function checkUpdates() {
   }, localUpdate ? '1' : '0');
   if (choice === '1') {
     await ui.task('正在更新本机文件，保留原有配置', () => updateLocal(root, latest.sha), { inline: false });
-    console.log('本机已更新。请关闭并重新双击“打开工具.cmd”，再进入“更多 → 检查更新”更新云端。');
+    log('本机已更新。请关闭并重新双击“打开工具.cmd”，再进入“更多 → 检查更新”更新云端。');
     return 'restart';
   }
   if (choice === '2') {
     if (status.version && newer(status.version, VERSION)) throw new Error('云端版本更新，请先更新本机工具，避免覆盖成旧版本。');
     const url = await deploy(root, ui);
     if (url && url !== profile.url) throw new Error('部署账号与原工具不同，请登录原 Cloudflare 账号后重试。');
-    console.log('云端已更新，绑定和设置已保留。');
+    log('云端已更新，绑定和设置已保留。');
   }
 }
 
@@ -280,7 +283,7 @@ async function moreSettings() {
     if (answer === '4') { await openService(true); return; }
     if (answer === '5') {
       const { status, chat } = await readOverview();
-      console.log(JSON.stringify({ localVersion: VERSION, cloudVersion: status.version,
+      log(JSON.stringify({ localVersion: VERSION, cloudVersion: status.version,
         sourceError: status.sourceError, lastCheck: status.lastCheck, service: status.service,
         chat: chat && { state: chat.state, lastError: chat.lastError, pending: chat.pending },
         chatEnqueueError: status.clawbotEnqueueError }, null, 2));
@@ -290,10 +293,10 @@ async function moreSettings() {
 }
 
 async function main() {
-  console.log('GPT今天重置了吗？ · 打开看动态，开启通知后可关闭电脑。');
-  try { profile = await ui.task('正在读取本机配置', () => loadProfile(root)); } catch (error) { console.log(error.message); }
+  log('GPT今天重置了吗？ · 打开看动态，开启通知后可关闭电脑。');
+  try { profile = await ui.task('正在读取本机配置', () => readProfile(root)); } catch (error) { log(error.message); }
   if (profile?.setup && await ui.choose('上次开通尚未完成，已保存进度。', { 1: '接着完成', 0: '稍后处理' }, '1') === '1') {
-    try { await continueSetup(); } catch (error) { console.log(error.message); }
+    try { await continueSetup(); } catch (error) { log(error.message); }
   }
   while (true) {
     try {
@@ -307,14 +310,14 @@ async function main() {
       }
       let status;
       try { status = await showStatus(); }
-      catch (error) { console.log('首页暂时无法更新：' + error.message); }
+      catch (error) { log('首页暂时无法更新：' + error.message); }
       const answer = await ui.choose('选择操作', {
         1: '查看最近动态', 2: '通知设置', 3: '发送测试通知',
         4: status?.paused ? '恢复通知' : '暂停通知', 5: '更多', 0: '退出，云端继续运行',
       });
       if (answer === '0') return;
       if (answer === '1') {
-        const result = await readOverview(); console.log(activityLines(result.status, result.chat).join('\n'));
+        const result = await readOverview(); log(activityLines(result.status, result.chat).join('\n'));
       }
       if (answer === '2') await notificationSettings();
       if (answer === '3') await testNotificationChannels(ui, accountApi);
@@ -326,10 +329,37 @@ async function main() {
       }
       if (answer === '5' && await moreSettings() === 'restart') return;
     } catch (error) {
-      console.log('这一步尚未完成：' + error.message);
-      console.log('已有配置已保留，可以重试；首次设置中断时可从“更多 → 继续开通”恢复。');
+      log('这一步尚未完成：' + error.message);
+      log('已有配置已保留，可以重试；首次设置中断时可从“更多 → 继续开通”恢复。');
     }
   }
 }
 
-try { await main(); } finally { ui.close(); }
+return { main, close() { ui.close(); }, async load() { profile = await readProfile(root); return profile; },
+  async overview() { await this.load(); if (!profile) return { connected: false, localVersion: VERSION };
+    let result;
+    try { result = await readOverview(); } catch (error) { result = { status: null, chat: null, error: error.message }; }
+    return { connected: true, url: profile.url, localVersion: VERSION, setupPending: !!profile.setup, ...result }; },
+  async run(action) {
+    await this.load();
+    if (action === 'setup') return openService();
+    if (action === 'connect') return importService();
+    if (action === 'recover') return openService(true);
+    if (!profile) throw new Error('请先开通或连接已有工具。');
+    if (action === 'continue') return continueSetup();
+    if (action === 'service') return bindService();
+    if (action === 'chat') return bindClawbot(ui, accountApi);
+    if (action === 'test') return testNotificationChannels(ui, accountApi);
+    if (action === 'test-service') return testService(ui, accountApi);
+    if (action === 'test-chat') return testClawbot(ui, accountApi);
+    if (action === 'updates') return checkUpdates();
+    throw new Error('无法识别这项操作。');
+  },
+  async request(path, body) { await this.load(); if (!profile) throw new Error('请先开通或连接已有工具。'); return accountApi(path, body); },
+};
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const manager = createManager();
+  try { await manager.main(); } finally { manager.close?.(); }
+}

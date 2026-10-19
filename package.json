@@ -1,6 +1,6 @@
 {
   "name": "did-gpt-reset-today",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "preview": "node scripts/preview.mjs",
     "setup": "node scripts/setup.mjs",
     "manage": "node scripts/manage.mjs",
+    "web": "node scripts/web.mjs",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --test-scheduled"
   },

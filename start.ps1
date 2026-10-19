@@ -1,4 +1,5 @@
-﻿$Host.UI.RawUI.WindowTitle = 'GPT今天重置了吗？'
+﻿param([switch]$Web)
+$Host.UI.RawUI.WindowTitle = 'GPT今天重置了吗？'
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 
@@ -33,5 +34,6 @@ if ((-not $tiboDependenciesMatch) -or (-not (Test-Path -LiteralPath (Join-Path $
     New-Item -ItemType Directory -Path (Split-Path -Parent $tiboInstalledHash) -Force | Out-Null
     Set-Content -LiteralPath $tiboInstalledHash -Value $tiboLockHash -Encoding Ascii
 }
-& $tiboNode 'scripts\setup.mjs'
+if ($Web) { & $tiboNode 'scripts\web.mjs' }
+else { & $tiboNode 'scripts\setup.mjs' }
 if ($LASTEXITCODE -ne 0) { throw '部署尚未完成，请根据提示处理后重试。' }
