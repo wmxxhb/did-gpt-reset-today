@@ -10,7 +10,7 @@ import { WebUI } from './lib/web-ui.mjs';
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'],
-  '/dashboard.mjs': ['dashboard.mjs', 'text/javascript; charset=utf-8'] };
+  '/dashboard.mjs': ['dashboard.mjs', 'text/javascript; charset=utf-8'], '/client.mjs': ['client.mjs', 'text/javascript; charset=utf-8'] };
 const operations = new Set(['setup', 'connect', 'recover', 'continue', 'service', 'chat', 'test', 'test-service', 'test-chat', 'updates']);
 const requests = new Set(['/check', '/settings', '/channels', '/pause', '/resume', '/clawbot/toggle', '/clawbot/refresh', '/clawbot/disable']);
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -85,8 +85,11 @@ function openBrowser(url) {
   child.on('error', () => console.log('浏览器未自动打开，请复制上面的地址。'));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const app = await startWeb();
-  console.log('GPT今天重置了吗？ · 网页版\n' + app.url + '\n浏览器会自动打开。请保留此窗口；关闭后云端监控继续运行。');
+  const portArgument = process.argv.find(arg => arg.startsWith('--port='));
+  const port = portArgument ? Number(portArgument.slice(7)) : 0;
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('无效的本机端口。');
+  const app = await startWeb({ port });
+  console.log('GPT今天重置了吗？ · 网页版\n' + app.url + '\n浏览器会自动打开。请保留此窗口；关闭后云端监控继续运行。\n重新启动后请使用新打开的页面，并关闭旧标签页。');
   if (!process.argv.includes('--no-open')) openBrowser(app.url);
   process.on('SIGINT', async () => { await app.close(); process.exit(0); });
 }

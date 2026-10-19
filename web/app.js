@@ -1,4 +1,5 @@
 import { renderOverview, chinaDate, shiftMonth, preserveOverview } from './dashboard.mjs';
+import { localRequest as request } from './client.mjs';
 
 const $ = selector => document.querySelector(selector);
 const h = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -8,25 +9,21 @@ const external = value => { try { const u = new URL(value); return u.protocol ==
 const link = (value, label = '查看原帖') => external(value) ? `<a href="${external(value)}" target="_blank" rel="noreferrer">${label}${icon('arrow-up-right')}</a>` : '';
 const button = (action, label, name, type = '') => `<button class="button ${type}" data-action="${action}">${name ? icon(name) : ''}${label}</button>`;
 let data = null, page = 'home', latestError = '', job = null, activePrompt = '', toastTimer, pending = false, polling = false, connectionReady = false;
+let latestErrorCode = '';
 const pageScroll = new Map();
 let calendarView = null, calendarSelected = null;
 const titles = { home: '概览', activity: '最近动态', notifications: '通知设置', more: '更多' };
 const chatLabels = { disabled: '已关闭', needs_login: '需要重新扫码', needs_reply: '请回复 ClawBot 一句话', quota_exhausted: '请回复 ClawBot 一句话续期', ready: '可用', error: '连接异常，请刷新' };
 const outcomes = { historical: '历史记录，不补发', filtered: '提醒范围未选中', paused: '通知已暂停', disabled: '通道关闭', queued: '等待发送', accepted: '接口已接受', failed: '发送失败，自动重试', expired: '已过期，不补发', withdrawn: '记录已更正，不再发送' };
 
-async function request(path, body) {
-  const res = await fetch('/api/' + path, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const result = await res.json(); if (!res.ok) throw new Error(result.error || '操作未完成，请重试。'); return result;
-}
 function toast(text) { clearTimeout(toastTimer); $('#toast').textContent = text; $('#toast').hidden = false; toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 6500); }
 function setBusy(value) { pending = value; $('#refresh').disabled = value; $('#refresh .icon').classList.toggle('busy', value); }
 async function reload(check = false) {
   setBusy(true);
   try { if (check && data?.connected) await request('request', { path: '/check', body: {} }); data = preserveOverview(data, await request('overview'));
     if (data.status && !data.status.service) { data.needsCloudUpdate = true; data.status.service = { enabled: true, configured: true, lastTest: data.status.lastTestResult }; }
-    latestError = data.error || ''; render(); }
-  catch (error) { latestError = error.message; if (data?.status) data = preserveOverview(data, { ...data, status: null, error: error.message }); render(); }
+    latestError = data.error || ''; latestErrorCode = ''; render(); }
+  catch (error) { latestError = error.message; latestErrorCode = error.code || ''; if (data?.status) data = preserveOverview(data, { ...data, status: null, error: error.message }); render(); }
   finally { setBusy(false); }
 }
 function switchControl(channel, enabled, label) { return `<button class="switch" role="switch" aria-checked="${!!enabled}" aria-label="${label}" data-toggle="${channel}"></button>`; }
@@ -85,7 +82,7 @@ function render() {
   $('#page-name').textContent = titles[page];
   updateTodayLabel();
   if (!connectionReady) { $('#main').innerHTML = `<div class="welcome"><h1>连接本机管理页面</h1><p>${h(latestError || '请重新双击“打开网页版.cmd”。')}</p></div>`; return; }
-  const errorBox = latestError ? `<div class="notice">${icon('triangle-alert')}<span>当前状态读取失败：${h(latestError)}${data?.connected ? ' 下方为上次读取的记录。' : ''}</span></div>` : '';
+  const errorBox = latestError ? `<div class="notice">${icon('triangle-alert')}<span>${latestErrorCode === 'local_unreachable' ? '本机连接已断开：' : '当前状态读取失败：'}${h(latestError)}${data?.connected ? ' 下方为上次读取的记录。' : ''}</span></div>` : '';
   $('#main').innerHTML = '<div class="content">' + errorBox + (!data ? '<div class="loading"><span class="spinner"></span><p>正在读取最新动态…</p></div>' : !data.connected ? welcome() : !data.status ? offline() : ({ home, activity, notifications, more }[page])()) + '</div>';
   $('#main').scrollTop = scrollTop;
   const s = data?.status; const healthy = data?.connected && !latestError && s?.lastSourceSuccess && Date.now() - s.lastSourceSuccess <= 900000 && !s.sourceError;
@@ -134,7 +131,7 @@ async function pollJob() {
   try {
     const value = await request('job'); showJob(value);
     if (!value || !['running', 'waiting'].includes(value.state)) await reload();
-  } catch (error) { job = { state: 'unavailable' }; $('#flow-result').textContent = error.message + ' 请保留后台窗口，刷新页面后可继续。'; $('#flow-close').disabled = false; }
+  } catch (error) { job = { state: 'unavailable' }; $('#flow-result').textContent = error.message + (error.code === 'local_unreachable' ? '' : ' 请保留后台窗口，刷新页面后可继续。'); $('#flow-close').disabled = false; }
   finally { polling = false; }
 }
 async function reply(value) {
