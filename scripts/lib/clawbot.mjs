@@ -11,20 +11,27 @@ export function chatStatusLines(s) {
   ];
 }
 
+export async function testClawbot(ui, api) {
+  const status = await api('/clawbot/refresh', {});
+  if (status.state === 'disabled') throw new Error('聊天提醒尚未开启。请从主菜单选择 8，扫码开启 ClawBot。');
+  if (status.state === 'needs_login') throw new Error('ClawBot 登录已失效，请从主菜单选择 8，重新扫码绑定。');
+  if (['needs_reply', 'quota_exhausted'].includes(status.state)) throw new Error('请先在微信中向 ClawBot 发一句话，然后重新发送聊天测试通知。');
+  console.log('\n正在发送 ClawBot 聊天测试，请查看微信里的 ClawBot 会话。');
+  await api('/clawbot/test', {});
+  const answer = await ui.choose('请查看微信 ClawBot 会话，确认这次测试的提醒效果。', {
+    1: '收到聊天测试通知，声音和未读提示符合预期', 2: '收到消息，但提醒效果不符合预期', 0: '没有收到 / 稍后检查',
+  });
+  if (answer === '1') { await api('/clawbot/confirm-test', {}); console.log('已记录聊天通道确认。服务号和聊天通道会分别发送重置通知。'); }
+  if (answer === '2') console.log('消息已到达，但系统通知权限、免打扰和微信版本会影响声音及角标。确认效果前可保持使用服务号。');
+  if (answer === '0') console.log('接口接受不等于手机收到。请先向 ClawBot 回复一句话，再选择刷新和测试。');
+  return answer === '1';
+}
+
 export async function manageClawbot(ui, api) {
   async function show() {
     const status = await api('/clawbot/status');
     console.log('\n' + chatStatusLines(status).join('\n'));
     return status;
-  }
-  async function test() {
-    await api('/clawbot/test', {});
-    const answer = await ui.choose('请查看微信 ClawBot 会话，确认这次测试的提醒效果。', {
-      1: '收到聊天测试通知，声音和未读提示符合预期', 2: '收到消息，但提醒效果不符合预期', 0: '没有收到 / 稍后检查',
-    });
-    if (answer === '1') { await api('/clawbot/confirm-test', {}); console.log('已记录你的确认。服务号和聊天通道会分别发送重置通知。'); }
-    if (answer === '2') console.log('消息已到达，但系统通知权限、免打扰和微信版本会影响声音及角标。确认效果前可保持使用服务号。');
-    if (answer === '0') console.log('接口接受不等于手机收到。请先向 ClawBot 回复一句话，再选择刷新和测试。');
   }
   while (true) {
     await show();
@@ -34,7 +41,7 @@ export async function manageClawbot(ui, api) {
     });
     if (answer === '0') return;
     if (answer === '2') { console.log(chatStatusLines(await api('/clawbot/refresh', {})).join('\n')); continue; }
-    if (answer === '3') { await test(); continue; }
+    if (answer === '3') { await testClawbot(ui, api); continue; }
     if (answer === '4') {
       const go = await ui.choose('将删除聊天通道的绑定和待发消息；之后可重新扫码开启。', { 1: '关闭聊天提醒', 0: '返回' });
       if (go === '1') { await api('/clawbot/disable', {}); console.log('聊天提醒已关闭，服务号仍正常工作。'); }
@@ -63,7 +70,7 @@ export async function manageClawbot(ui, api) {
     console.log('\n绑定成功。请在手机微信的 ClawBot 会话中发一句话，例如“开启提醒”。');
     if (await ui.choose('发送后继续：', { 1: '已发送，激活并测试', 0: '稍后处理' }, '1') === '0') continue;
     const status = await api('/clawbot/refresh', {});
-    if (status.state === 'ready') await test();
+    if (status.state === 'ready') await testClawbot(ui, api);
     else console.log(chatStatusLines(status).join('\n'));
   }
 }

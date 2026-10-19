@@ -119,7 +119,7 @@ test('upstream rejection cannot leak secrets; requires a new reply and leaves pr
   assert.equal((await bot.load()).lastTest, null);
 });
 
-test('missing ret or malformed send response does not count as accepted; device confirmation is explicit', async () => {
+test('empty send response does not count as accepted; device confirmation is explicit', async () => {
   const storage = memory(); await storage.put('clawbot', ready()); let now = NOW, data = {};
   const bot = new ClawBot(storage, async () => Response.json(data), () => now);
   assert.equal((await bot.handle(request('test'))).status, 502);
@@ -129,6 +129,23 @@ test('missing ret or malformed send response does not count as accepted; device 
   assert.equal((await bot.load()).lastTest.confirmedByUserAt, undefined);
   assert.equal((await bot.handle(request('confirm-test'))).status, 200);
   assert.equal((await bot.load()).lastTest.confirmedByUserAt, now);
+});
+
+test('message_id without ret is accepted, while an explicit error or invalid ID is never accepted', async () => {
+  for (const response of [{ message_id: 'synthetic-message-123' }, { message_id: 123456789 }]) {
+    const storage = memory(); await storage.put('clawbot', ready());
+    const bot = new ClawBot(storage, async () => Response.json(response), () => NOW);
+    assert.equal((await bot.handle(request('test'))).status, 200);
+    assert.equal((await bot.load()).lastTest.status, 'accepted');
+    assert.equal((await bot.load()).lastTest.confirmedByUserAt, undefined);
+  }
+  for (const response of [{}, { message_id: '' }, { message_id: {} }, { message_id: 0 },
+    { ret: -2, message_id: 'synthetic-message' }, { errcode: -14, message_id: 'synthetic-message' }]) {
+    const storage = memory(); await storage.put('clawbot', ready());
+    const bot = new ClawBot(storage, async () => Response.json(response), () => NOW);
+    assert.equal((await bot.handle(request('test'))).status, 502);
+    assert.equal((await bot.load()).lastTest, null);
+  }
 });
 
 test('optional enqueue failure cannot duplicate primary delivery', async () => {

@@ -88,7 +88,7 @@ export function statusLines(s, now = Date.now()) {
     `运行状态：${health}`,
     `提醒内容：${mode}${s.settings?.banked ? '，包含可储备重置' : ''}`,
     `最近读取：${age === null ? '尚未成功读取' : `${age} 分钟前`}`,
-    `微信验证：${s.lastTestResult?.confirmedByUserAt ? '你已确认收到测试通知' : '尚未确认手机收到，请选择发送测试通知'}`,
+    `服务号验证：${s.lastTestResult?.confirmedByUserAt ? '你已确认收到测试通知' : '尚未确认手机收到，请选择发送测试通知'}`,
     `等待重试：${s.pending?.length || 0} 条`,
   ];
 }

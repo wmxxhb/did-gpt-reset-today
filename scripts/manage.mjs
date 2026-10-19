@@ -7,6 +7,7 @@ import { api as requestApi, statusLines, workerUrl, deploymentUrl } from './lib/
 import { saveProfile, loadProfile } from './lib/profile.mjs';
 import { deploy, wrangler } from './lib/cloud.mjs';
 import { manageClawbot, chatStatusLines } from './lib/clawbot.mjs';
+import { testService, testNotificationChannels } from './lib/notification-tests.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ui = new UI();
@@ -14,7 +15,7 @@ let profile;
 
 const REQUEST_LABELS = {
   '/status': '正在连接云端并检查状态', '/settings': '正在读取或保存提醒选项',
-  '/test': '正在提交微信测试通知', '/confirm-test': '正在保存你的送达确认',
+  '/test': '正在提交服务号测试通知', '/confirm-test': '正在保存你的送达确认',
   '/check': '正在检查最新公告', '/pause': '正在暂停提醒', '/resume': '正在恢复提醒',
   '/reset-test': '正在更新微信验证状态',
   '/clawbot/login/start': '正在生成微信聊天绑定二维码', '/clawbot/login/poll': '正在等待手机扫码确认',
@@ -79,19 +80,7 @@ async function chooseSettings() {
 }
 
 async function testPhone() {
-  console.log('\n正在发送一条测试通知，请查看手机微信……');
-  await api(profile, '/test', {});
-  const received = await ui.choose('手机微信收到测试通知了吗？', {
-    1: '已收到', 2: '没收到，查看处理方法', 3: '稍后验证，先返回菜单',
-  });
-  if (received === '1') {
-    await api(profile, '/confirm-test', {});
-    console.log('\n微信通道验证完成。电脑关机后，已部署的监控仍会在云端运行。');
-  } else if (received === '2') {
-    console.log('\n目前只确认推送服务收到了请求，尚未确认微信送达。');
-    console.log('先检查公众号是否已关注；然后从菜单选择“更换微信绑定”，重新复制 token。');
-    console.log('若刚注册免费网址，请等待几分钟。测试通知每分钟最多一条。');
-  } else console.log('已保留配置，验证状态仍为“未确认收到”，之后从菜单发测试即可。');
+  return testService(ui, (path, body) => api(profile, path, body));
 }
 
 async function showStatus() {
@@ -207,14 +196,14 @@ async function main() {
         continue;
       }
       const answer = await ui.choose('选择你要做的事', {
-        1: '查看运行状态', 2: '发送微信测试通知', 3: '选择提醒内容',
-        4: '暂停 / 恢复提醒', 5: '更换微信绑定', 6: '更新云端程序（保留绑定）',
+        1: '查看运行状态', 2: '发送测试通知（选择通道）', 3: '选择提醒内容',
+        4: '暂停 / 恢复提醒', 5: '更换服务号微信绑定', 6: '更新云端程序（保留绑定）',
         7: '重新接管管理权限（旧管理密钥将失效）', 0: '退出，云端监控继续运行',
         8: '微信聊天提醒（ClawBot，可选）',
       }, '1');
       if (answer === '0') return;
       if (answer === '1') await showStatus();
-      if (answer === '2') await testPhone();
+      if (answer === '2') await testNotificationChannels(ui, (path, body) => api(profile, path, body));
       if (answer === '3') {
         const settings = await chooseSettings();
         if (settings) { await api(profile, '/settings', settings); console.log('提醒选项已生效。'); }

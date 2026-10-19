@@ -166,7 +166,11 @@ export class ClawBot {
         message_type: 2, message_state: 2, context_token: s.context,
         item_list: [{ type: 1, text_item: { text } }],
       } });
-      if (data.ret !== 0) throw new Error('clawbot_invalid_response');
+      // iLink can omit the default-zero ret field and return only message_id.
+      // An empty/unrelated JSON object still does not establish acceptance.
+      const hasMessageId = (typeof data.message_id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(data.message_id))
+        || (typeof data.message_id === 'number' && Number.isFinite(data.message_id) && data.message_id > 0);
+      if (data.ret !== 0 && !(data.ret === undefined && hasMessageId)) throw new Error('clawbot_invalid_response');
       s.lastError = null; s.lastAcceptedAt = this.clock();
       // Never claim a device delivery, including when no message_id is returned.
       return { status: 'accepted', at: this.clock() };
