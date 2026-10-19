@@ -9,30 +9,27 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <div class="desktop-label"><svg class="icon"><use href="/icons.svg#activity"/></svg> GPT今天重置了吗？ <span>每一次重置，都有消息。</span></div>
   <div class="window">
     <aside class="sidebar">
-      <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div class="brand"><div class="brand-icon"><svg class="icon"><use href="/icons.svg#activity"/></svg></div><div><strong>重置提醒</strong><small>GPT今天重置了吗？</small></div></div>
-      <div class="nav-label">工作空间</div>
+      <div class="brand"><div class="brand-icon"><svg class="icon"><use href="/icons.svg#activity"/></svg></div><strong>GPT今天重置了吗？</strong></div>
       <nav aria-label="主导航">
         <button class="nav active" data-page="home"><svg class="icon"><use href="/icons.svg#monitor"/></svg>概览</button>
         <button class="nav" data-page="activity"><svg class="icon"><use href="/icons.svg#activity"/></svg>最近动态</button>
         <button class="nav" data-page="notifications"><svg class="icon"><use href="/icons.svg#bell"/></svg>通知设置</button>
         <button class="nav" data-page="more"><svg class="icon"><use href="/icons.svg#sliders-horizontal"/></svg>更多</button>
       </nav>
-      <div class="sidebar-bottom"><div id="cloud-state"><span class="dot muted"></span>正在读取状态</div><p>关闭网页后<br>云端仍会自动监控</p><small id="version">本机管理 · 网页版</small></div>
+      <div class="sidebar-bottom"><div id="cloud-state"><span class="dot muted"></span>正在读取状态</div><small id="version">本机管理</small></div>
     </aside>
     <div class="workspace">
-      <header class="toolbar"><div class="breadcrumb">重置提醒 <span>/</span> <strong id="page-name">概览</strong></div><div class="toolbar-right"><span id="today"></span><button id="refresh" class="icon-button" aria-label="刷新状态" title="刷新状态"><svg class="icon"><use href="/icons.svg#refresh-cw"/></svg></button></div></header>
+      <header class="toolbar"><h1 id="page-name">概览</h1><div class="toolbar-right"><span id="today"></span><button id="refresh" class="button" aria-label="刷新状态"><svg class="icon"><use href="/icons.svg#refresh-cw"/></svg><span>刷新</span></button></div></header>
       <main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span><p>正在读取最新动态…</p></div></main>
-      <footer><span><svg class="icon"><use href="/icons.svg#shield-check"/></svg>本机管理 · 配置与终端共用</span><a href="https://github.com/wmxxhb/did-gpt-reset-today" target="_blank" rel="noreferrer">GitHub <svg class="icon"><use href="/icons.svg#arrow-up-right"/></svg></a></footer>
+      <footer><span id="last-updated">正在连接</span><a href="https://codex-reset.com/" target="_blank" rel="noreferrer">数据来源 <svg class="icon"><use href="/icons.svg#arrow-up-right"/></svg></a></footer>
     </div>
   </div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="flow" aria-labelledby="flow-title">
     <div class="dialog-top"><div class="dialog-icon"><svg class="icon"><use href="/icons.svg#settings"/></svg></div><button id="flow-close" class="icon-button" aria-label="关闭操作窗口"><svg class="icon"><use href="/icons.svg#x"/></svg></button></div>
-    <h2 id="flow-title">正在准备</h2><p class="flow-subtitle">按提示完成即可，已有配置会保留。</p>
+    <h2 id="flow-title">正在准备</h2>
     <div id="flow-progress" role="status" aria-live="polite"></div>
     <div id="flow-guidance"></div><div id="qr-area"></div><div id="prompt-area"></div><div id="flow-result" aria-live="polite"></div>
     <details class="operation-details"><summary>操作详情</summary><div id="flow-logs"></div></details>

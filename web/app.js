@@ -6,8 +6,9 @@ const external = value => { try { const u = new URL(value); return u.protocol ==
 const link = (value, label = '查看原帖') => external(value) ? `<a href="${external(value)}" target="_blank" rel="noreferrer">${label}${icon('arrow-up-right')}</a>` : '';
 const button = (action, label, name, type = '') => `<button class="button ${type}" data-action="${action}">${name ? icon(name) : ''}${label}</button>`;
 let data = null, page = 'home', latestError = '', job = null, activePrompt = '', toastTimer, pending = false, polling = false, connectionReady = false;
+const pageScroll = new Map();
 const titles = { home: '概览', activity: '最近动态', notifications: '通知设置', more: '更多' };
-const chatLabels = { disabled: '已关闭', needs_login: '需要重新扫码', needs_reply: '请回复 ClawBot 一句话', quota_exhausted: '请回复 ClawBot 一句话续期', ready: '会话正常，可以接收提醒', error: '连接异常，请刷新' };
+const chatLabels = { disabled: '已关闭', needs_login: '需要重新扫码', needs_reply: '请回复 ClawBot 一句话', quota_exhausted: '请回复 ClawBot 一句话续期', ready: '可用', error: '连接异常，请刷新' };
 const outcomes = { historical: '历史记录，不补发', filtered: '提醒范围未选中', paused: '通知已暂停', disabled: '通道关闭', queued: '等待发送', accepted: '接口已接受', failed: '发送失败，自动重试', expired: '已过期，不补发', withdrawn: '记录已更正，不再发送' };
 
 async function request(path, body) {
@@ -26,7 +27,7 @@ async function reload(check = false) {
   finally { setBusy(false); }
 }
 function switchControl(channel, enabled, label) { return `<button class="switch" role="switch" aria-checked="${!!enabled}" aria-label="${label}" data-toggle="${channel}"></button>`; }
-function heading(title, subtitle, action = '') { return `<div class="page-heading"><div><div class="eyebrow">YOUR RESET WORKSPACE</div><h1>${title}</h1><p class="subheading">${subtitle}</p></div>${action}</div>`; }
+function heading(title, subtitle = '', action = '') { return `<div class="page-heading"><div><h2>${title}</h2>${subtitle ? `<p class="subheading">${subtitle}</p>` : ''}</div>${action}</div>`; }
 function warnings(s, c) {
   const result = [];
   if (data.needsCloudUpdate) result.push(`<div class="notice info">${icon('download')}<span>已连接早期云端版本，请在“更多 → 检查更新”升级后使用独立通知开关。</span></div>`);
@@ -43,12 +44,12 @@ function channelCard(kind) {
   const enabled = !!info?.enabled, configured = !!info?.configured;
   const healthy = chat ? c?.state === 'ready' : enabled && configured && !info?.error;
   const unknown = !info;
-  const status = unknown ? '暂时无法读取状态' : !enabled ? '已关闭，随时可以开启' : chat ? chatLabels[c.state] || '状态未知'
-    : !configured ? '尚未绑定' : info.error ? '发送异常，请测试检查' : '通道正常，可以接收提醒';
+  const status = unknown ? '暂时无法读取状态' : !enabled ? '已关闭' : chat ? chatLabels[c.state] || '状态未知'
+    : !configured ? '尚未绑定' : info.error ? '发送异常，请测试检查' : '可用';
   const confirmed = info?.lastTest?.confirmedByUserAt;
-  return `<section class="card channel"><div class="channel-top"><div class="channel-icon ${chat ? 'chat' : ''}">${icon(chat ? 'message-circle' : 'bell')}</div><div><h3>${chat ? '聊天提醒' : '服务号提醒'}</h3><small>${chat ? '像微信聊天一样接收消息' : '关注服务号，轻松接收提醒'}</small></div>${unknown ? '' : switchControl(kind, enabled, chat ? '聊天提醒开关' : '服务号提醒开关')}</div>
+  return `<section class="card channel"><div class="channel-top"><div class="channel-icon ${chat ? 'chat' : ''}">${icon(chat ? 'message-circle' : 'bell')}</div><div><h3>${chat ? '聊天提醒' : '服务号提醒'}</h3></div>${unknown ? '' : switchControl(kind, enabled, chat ? '聊天提醒开关' : '服务号提醒开关')}</div>
     <div class="channel-status"><span class="dot ${healthy ? '' : enabled ? 'warning' : 'muted'}"></span>${h(status)}</div>
-    <p class="channel-note">${enabled ? confirmed ? '你已在手机确认收到测试通知' : '尚未确认手机收到，建议发送测试通知' : configured ? '已保留绑定，重新开启不会补发旧消息' : chat ? '扫码绑定；约 24 小时需要回复一句话续期' : '可选通道，微信可能折叠服务号提醒'}</p>
+    <p class="channel-note">${enabled ? confirmed ? '手机测试已确认' : '尚未确认手机送达' : configured ? '绑定已保留' : chat ? '扫码绑定，需定期回复续期' : '绑定后接收服务号通知'}</p>
     <div class="channel-actions"><button class="text-button" data-action="${chat ? 'chat' : 'service'}">${configured ? '更换绑定' : '绑定并开启'}</button>${enabled ? `<button class="text-button" data-action="${chat ? 'test-chat' : 'test-service'}">发送测试</button>` : ''}${chat && enabled ? '<button class="text-button" data-action="chat-refresh">刷新会话</button>' : ''}${chat && configured && page === 'notifications' ? '<button class="text-button" data-action="chat-clear">清除绑定</button>' : ''}</div></section>`;
 }
 function recentRow(row) { return `<div class="recent-row"><div class="event-icon">${icon(row.stage === 'planned' ? 'bell' : 'check')}</div><div><h3>${h(row.title)}</h3><p>${time(row.at)} · 北京时间</p></div>${link(row.url)}</div>`; }
@@ -60,14 +61,14 @@ function home() {
   const description = latest ? latest.stage === 'observed' ? '监测站记录到一次重置；你的账号是否到账，请查看额度页面。'
     : latest.stage === 'completed' ? 'Tibo 已宣布完成重置；你的账号是否到账，请查看额度页面。' : 'Tibo 发布了预告或发放进度，尚不能据此认定额度已到账。'
     : '有新的公开重置消息时，这里会自动更新。';
-  return heading('重置消息，一眼就知道。', '关注 Codex / ChatGPT Work 的公开额度重置动态。', button('test', '测试通知', 'bell')) + warnings(s, c)
-    + `<section class="hero"><div class="hero-head">${icon('activity')}最新重置动态 <span class="pill ${fresh && latest ? '' : 'neutral'}">${fresh ? stageLabel || '持续监测中' : '等待更新'}</span></div><h2>${h(title)}</h2><p class="description">${h(description)}</p><div class="hero-foot"><span>${latest ? '消息时间：' + time(latest.at) : '每两分钟自动检查'}${latest ? ' · 北京时间' : ''}</span>${latest ? link(latest.url) : ''}</div><div class="hero-mark">${icon('activity')}</div></section>`
-    + `<h2 class="section-title">通知通道 <span>独立开关 · 只配置你需要的方式</span></h2><div class="channel-grid">${channelCard('service')}${channelCard('chat')}</div>`
-    + `<h2 class="section-title">最近动态 <button class="text-button" data-nav="activity">查看全部 ${icon('chevron-right')}</button></h2><div class="card recent-card">${items.length ? items.slice(0, 3).map(recentRow).join('') : '<div class="empty">暂时没有重置消息。首次更新只建立记录，不补发历史通知。</div>'}</div><p class="subheading section-gap">最近更新：${time(s.lastSourceSuccess)} · 数据来自 codex-reset.com</p>`;
+  return heading('最新消息', '', button('test', '测试通知', 'bell')) + warnings(s, c)
+    + `<section class="hero"><div class="hero-head"><span class="pill ${!fresh || !latest || latest.stage === 'observed' ? 'neutral' : latest.stage === 'completed' ? '' : 'blue'}">${fresh ? stageLabel || '持续监测中' : '等待更新'}</span></div><h3>${h(title)}</h3><p class="description">${h(description)}</p><div class="hero-foot"><span>${latest ? '消息时间：' + time(latest.at) : '每两分钟自动检查'}${latest ? ' · 北京时间' : ''}</span>${latest ? link(latest.url) : ''}</div></section>`
+    + `<h2 class="section-title">通知通道</h2><div class="channel-grid">${channelCard('service')}${channelCard('chat')}</div>`
+    + `<h2 class="section-title">最近动态 <button class="text-button" data-nav="activity">查看全部 ${icon('chevron-right')}</button></h2><div class="card recent-card">${items.length ? items.slice(0, 3).map(recentRow).join('') : '<div class="empty">暂时没有重置消息。首次更新只建立记录，不补发历史通知。</div>'}</div>`;
 }
 function activity() {
   const s = data.status, c = data.chat;
-  return heading('每条消息，都有来处。', '查看原帖与两个通知通道各自的处理结果。') + `<div class="activity-list">${(s.activity || []).map(row => {
+  return heading('最近动态', `${(s.activity || []).length} 条记录`) + `<div class="activity-list">${(s.activity || []).map(row => {
     const chatResult = c?.recent?.find(r => r.key === row.key);
     const chatOutcome = chatResult ? outcomes[chatResult.status] || '状态未知' : ['historical', 'filtered', 'paused'].includes(row.service) ? outcomes[row.service] : c?.enabled === false ? '通道关闭 / 未开启' : '暂无发送记录';
     return `<article class="card activity-item"><header><div class="event-icon">${icon(row.withdrawn ? 'triangle-alert' : row.stage === 'planned' ? 'bell' : 'check')}</div><div><h3>${h(row.title)}</h3><time>${time(row.at)} · 北京时间</time></div>${link(row.url)}</header><p class="excerpt">${row.withdrawn ? '记录已更正：当前不再认定为重置消息。' : h(row.text || '请查看原帖或监测站记录。')}</p>${row.withdrawn ? '' : `<div class="outcomes"><span>服务号 · ${h(outcomes[row.service] || '未记录发送结果')}</span><span>聊天 · ${h(chatOutcome)}</span></div>`}</article>`;
@@ -75,25 +76,28 @@ function activity() {
 }
 function notifications() {
   const s = data.status, settings = s.settings || {};
-  return heading('按你习惯的方式提醒。', '两个通道都可选，也可以关闭通知，只查看动态。', button('test', '测试通知', 'bell')) + warnings(s, data.chat)
-    + `<div class="channel-grid">${channelCard('service')}${channelCard('chat')}</div><h2 class="section-title">提醒内容</h2><div class="card settings-card"><div class="setting-row"><div><h3>哪些消息需要提醒</h3><p>推荐预告和完成各提醒一次。</p></div><div class="segmented" role="group" aria-label="提醒范围">${[['both', '预告 + 完成'], ['completed', '仅完成'], ['all', '全部进度']].map(([value, label]) => `<button class="${settings.alerts === value ? 'selected' : ''}" data-scope="${value}" aria-pressed="${settings.alerts === value}">${label}</button>`).join('')}</div></div><div class="setting-row"><div><h3>可储备重置</h3><p>额外提醒可手动使用的储备额度，默认关闭。</p></div>${switchControl('banked', settings.banked, '可储备重置提醒')}</div></div><h2 class="section-title section-gap">通知运行</h2><div class="card settings-card"><div class="setting-row"><div><h3>${s.paused ? '通知已暂停' : '允许发送通知'}</h3><p>暂停时继续更新动态，恢复后不补发暂停期间的消息。</p></div>${button(s.paused ? 'resume' : 'pause', s.paused ? '恢复通知' : '暂停通知', s.paused ? 'play' : 'pause')}</div></div>`;
+  return heading('通知通道', '', button('test', '测试通知', 'bell')) + warnings(s, data.chat)
+    + `<div class="channel-grid">${channelCard('service')}${channelCard('chat')}</div><h2 class="section-title">提醒内容</h2><div class="card settings-card"><div class="setting-row"><div><h3>提醒范围</h3></div><div class="segmented" role="group" aria-label="提醒范围">${[['both', '预告 + 完成'], ['completed', '仅完成'], ['all', '全部进度']].map(([value, label]) => `<button class="${settings.alerts === value ? 'selected' : ''}" data-scope="${value}" aria-pressed="${settings.alerts === value}">${label}</button>`).join('')}</div></div><div class="setting-row"><div><h3>可储备重置</h3><p>额外提醒可手动使用的储备额度，默认关闭。</p></div>${switchControl('banked', settings.banked, '可储备重置提醒')}</div></div><h2 class="section-title section-gap">通知运行</h2><div class="card settings-card"><div class="setting-row"><div><h3>${s.paused ? '通知已暂停' : '允许发送通知'}</h3><p>暂停时继续更新动态，恢复后不补发暂停期间的消息。</p></div>${button(s.paused ? 'resume' : 'pause', s.paused ? '恢复通知' : '暂停通知', s.paused ? 'play' : 'pause')}</div></div>`;
 }
 function more() {
   const s = data.status;
   const row = (action, name, description, symbol) => `<button class="more-row" data-action="${action}">${icon(symbol)}<span><strong>${name}</strong><small>${description}</small></span><span class="arrow">${icon('chevron-right')}</span></button>`;
-  return heading('需要的时候，再多一点。', '开通、连接和更新，在这里统一管理。') + `<div class="card settings-card">${data.setupPending ? row('continue', '继续上次开通', '使用已保存的进度接着设置', 'play') : ''}${row('updates', '检查更新', `本机 ${h(data.localVersion)} · 云端 ${h(s.version || '早期版本')} · 保留已有绑定和设置`, 'download')}${row('connect', '连接其他已有工具', '输入原网址和管理密钥，切换本机连接', 'link')}${row('recover', '恢复管理权限', '找不到原密钥时使用，恢复后旧密钥将失效', 'shield-check')}${row('diagnostics', '诊断信息', '查看数据读取、通道状态和错误代码', 'circle-help')}</div><div class="notice info section-gap">${icon('cloud')}<span>监控在 Cloudflare 运行。网页与终端读取同一份本机加密配置；关闭网页不会停止监控。</span></div><p class="subheading">当前连接：${h(data.url)}<br>网页图标来自 Lucide（ISC）；macOS 风格界面为本项目实现。</p>`;
+  return heading('工具管理') + `<div class="card settings-card">${data.setupPending ? row('continue', '继续上次开通', '使用已保存的进度接着设置', 'play') : ''}${row('updates', '检查更新', `本机 ${h(data.localVersion)} · 云端 ${h(s.version || '早期版本')}`, 'download')}${row('connect', '连接其他已有工具', '输入原网址和管理密钥，切换本机连接', 'link')}${row('recover', '恢复管理权限', '找不到原密钥时使用，恢复后旧密钥将失效', 'shield-check')}${row('diagnostics', '诊断信息', '查看数据读取、通道状态和错误代码', 'circle-help')}</div><p class="subheading section-gap">当前连接：${h(data.url)}</p>`;
 }
-function welcome() { return `<div class="welcome"><div class="brand-icon">${icon('activity')}</div><div class="eyebrow">A LITTLE LESS CHECKING</div><h1>GPT今天重置了吗？</h1><p>不用反复刷消息。<br>有新的重置动态，就在微信提醒你。</p><div class="welcome-actions">${button('setup', '第一次使用，开始设置', 'plus', 'primary')}${button('connect', '连接已有工具', 'link')}</div><button class="text-button" data-action="recover">已有工具，找不到管理密钥？</button><div class="card welcome-note">服务号和聊天提醒都可选，也可以先只看动态。<br>完成开通后电脑关机仍会自动监控。</div></div>`; }
-function offline() { return heading('暂时无法读取云端。', '本机连接配置已保留，可以刷新重试，也可以修复连接。') + `<div class="card"><p class="subheading">当前连接：${h(data.url)}</p><div class="welcome-actions">${data.setupPending ? button('continue', '继续开通', 'play', 'primary') : ''}${button('connect', '重新连接', 'link')}${button('recover', '恢复管理权限', 'shield-check')}</div><p class="subheading">网络异常时请检查系统代理；刚创建的云端网址可能需要几分钟生效。</p></div>`; }
+function welcome() { return `<div class="welcome"><div class="brand-icon">${icon('activity')}</div><h2>开通重置提醒</h2><p>选择通知方式，完成云端开通。</p><div class="welcome-actions">${button('setup', '开始设置', 'plus', 'primary')}${button('connect', '连接已有工具', 'link')}</div><button class="text-button" data-action="recover">恢复管理权限</button></div>`; }
+function offline() { return heading('无法连接云端', '本机连接配置已保留，可以刷新重试，也可以修复连接。') + `<div class="card"><p class="subheading">当前连接：${h(data.url)}</p><div class="welcome-actions">${data.setupPending ? button('continue', '继续开通', 'play', 'primary') : ''}${button('connect', '重新连接', 'link')}${button('recover', '恢复管理权限', 'shield-check')}</div><p class="subheading">网络异常时请检查系统代理；刚创建的云端网址可能需要几分钟生效。</p></div>`; }
 function render() {
+  const scrollTop = $('#main').scrollTop;
   document.querySelectorAll('[data-page]').forEach(el => { el.classList.toggle('active', el.dataset.page === page); el.setAttribute('aria-current', el.dataset.page === page ? 'page' : 'false'); });
   $('#page-name').textContent = titles[page];
   if (!connectionReady) { $('#main').innerHTML = `<div class="welcome"><h1>连接本机管理页面</h1><p>${h(latestError || '请重新双击“打开网页版.cmd”。')}</p></div>`; return; }
   const errorBox = latestError ? `<div class="notice">${icon('triangle-alert')}<span>当前状态读取失败：${h(latestError)}${data?.connected ? ' 下方为上次读取的记录。' : ''}</span></div>` : '';
-  $('#main').innerHTML = errorBox + (!data ? '<div class="loading"><span class="spinner"></span><p>正在读取最新动态…</p></div>' : !data.connected ? welcome() : !data.status ? offline() : ({ home, activity, notifications, more }[page])());
+  $('#main').innerHTML = '<div class="content">' + errorBox + (!data ? '<div class="loading"><span class="spinner"></span><p>正在读取最新动态…</p></div>' : !data.connected ? welcome() : !data.status ? offline() : ({ home, activity, notifications, more }[page])()) + '</div>';
+  $('#main').scrollTop = scrollTop;
   const s = data?.status; const healthy = data?.connected && !latestError && s?.lastSourceSuccess && Date.now() - s.lastSourceSuccess <= 900000 && !s.sourceError;
   $('#cloud-state').innerHTML = `<span class="dot ${healthy ? s?.paused ? 'warning' : '' : 'muted'}"></span>${!data?.connected ? '尚未连接云端' : latestError ? '连接需要检查' : s?.paused ? '监控中 · 通知已暂停' : healthy ? '云端正在监控' : '等待数据更新'}`;
-  $('#version').textContent = data?.localVersion ? `v${data.localVersion} · 本机管理` : '本机管理 · 网页版';
+  $('#version').textContent = data?.localVersion ? `v${data.localVersion}` : '本机管理';
+  $('#last-updated').textContent = s?.lastSourceSuccess ? `最近更新：${time(s.lastSourceSuccess)}（北京时间）` : '尚未读取到动态';
 }
 async function mutate(path, body, success) {
   if (pending) return; setBusy(true);
@@ -159,7 +163,7 @@ function diagnostics() {
 }
 document.addEventListener('click', async event => {
   const el = event.target.closest('button'); if (!el || el.disabled) return;
-  if (el.dataset.page || el.dataset.nav) { page = el.dataset.page || el.dataset.nav; render(); return; }
+  if (el.dataset.page || el.dataset.nav) { pageScroll.set(page, $('#main').scrollTop); page = el.dataset.page || el.dataset.nav; render(); $('#main').scrollTop = pageScroll.get(page) || 0; $('#main').focus({ preventScroll: true }); return; }
   if (el.dataset.reply !== undefined) return reply(el.dataset.reply);
   if (el.hasAttribute('data-close-flow')) return closeFlow();
   if (el.dataset.scope) return mutate('/settings', { ...data.status.settings, alerts: el.dataset.scope }, '提醒内容已保存');

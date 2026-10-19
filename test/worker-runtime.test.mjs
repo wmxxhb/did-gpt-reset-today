@@ -54,6 +54,6 @@ test('Cloudflare runtime routes the optional actor and can generate a QR without
     assert.equal((await send('/clawbot/toggle', { enabled: false })).status, 200);
     const main = await (await mf.dispatchFetch('https://example.com/status', { headers })).json();
     assert.equal(main.service.enabled, false, 'chat-only never requires a service token');
-    assert.equal(main.version, '0.3.0');
+    assert.equal(main.version, '0.3.1');
   } finally { await mf.dispose(); }
 });

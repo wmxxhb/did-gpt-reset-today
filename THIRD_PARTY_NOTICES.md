@@ -47,4 +47,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-界面视觉参考 [sylonik/macos-ui](https://github.com/sylonik/macos-ui) 的 macOS 窗口风格。布局与交互在本项目独立实现，未复制其组件代码，也不使用 Apple 图标、商标或壁纸。
+界面布局参考 [shadcn/ui](https://github.com/shadcn-ui/ui) 的应用侧栏与控件组织方式；早期版本也参考过 [sylonik/macos-ui](https://github.com/sylonik/macos-ui)。布局、样式及交互均在本项目独立实现，未复制上述项目的组件代码，也不使用 Apple 图标、商标或壁纸。
