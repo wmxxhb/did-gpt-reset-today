@@ -135,7 +135,7 @@ export class ResetMonitor {
 
 function publicStatus(s, env) {
   return {
-    version: VERSION, service: serviceChannel(s, env), activity: s.activity || [], policyRevision: s.policyRevision || 0, withdrawnIds: s.withdrawnIds || [],
+    version: VERSION, service: serviceChannel(s, env), activity: s.activity || [], resetHistory: s.resetHistory || [], policyRevision: s.policyRevision || 0, withdrawnIds: s.withdrawnIds || [],
     initialized: s.initialized, paused: s.paused,
     lastCheck: s.lastCheck, lastSourceSuccess: s.lastSuccess, sourceError: s.lastError,
     consecutiveSourceFailures: s.failures, nextFetch: s.nextFetch,

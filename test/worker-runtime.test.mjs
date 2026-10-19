@@ -7,7 +7,7 @@ test('Cloudflare runtime routes the optional actor and can generate a QR without
   let calls = 0;
   const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{
     name: 'clawbot-runtime-test',
-    modules: ['worker', 'monitor', 'classify', 'settings', 'clawbot', 'version'].map(name => ({
+    modules: ['worker', 'monitor', 'classify', 'settings', 'clawbot', 'version', 'reset-history'].map(name => ({
       type: 'ESModule', path: fileURLToPath(new URL(`../src/${name}.mjs`, import.meta.url)),
     })),
     compatibilityDate: '2025-10-01',
@@ -54,6 +54,6 @@ test('Cloudflare runtime routes the optional actor and can generate a QR without
     assert.equal((await send('/clawbot/toggle', { enabled: false })).status, 200);
     const main = await (await mf.dispatchFetch('https://example.com/status', { headers })).json();
     assert.equal(main.service.enabled, false, 'chat-only never requires a service token');
-    assert.equal(main.version, '0.3.1');
+    assert.equal(main.version, '0.4.0');
   } finally { await mf.dispose(); }
 });

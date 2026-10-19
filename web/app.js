@@ -1,3 +1,5 @@
+import { renderOverview, chinaDate, shiftMonth, preserveOverview } from './dashboard.mjs';
+
 const $ = selector => document.querySelector(selector);
 const h = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const icon = name => `<svg class="icon" aria-hidden="true"><use href="/icons.svg#${name}"/></svg>`;
@@ -7,6 +9,7 @@ const link = (value, label = '查看原帖') => external(value) ? `<a href="${ex
 const button = (action, label, name, type = '') => `<button class="button ${type}" data-action="${action}">${name ? icon(name) : ''}${label}</button>`;
 let data = null, page = 'home', latestError = '', job = null, activePrompt = '', toastTimer, pending = false, polling = false, connectionReady = false;
 const pageScroll = new Map();
+let calendarView = null, calendarSelected = null;
 const titles = { home: '概览', activity: '最近动态', notifications: '通知设置', more: '更多' };
 const chatLabels = { disabled: '已关闭', needs_login: '需要重新扫码', needs_reply: '请回复 ClawBot 一句话', quota_exhausted: '请回复 ClawBot 一句话续期', ready: '可用', error: '连接异常，请刷新' };
 const outcomes = { historical: '历史记录，不补发', filtered: '提醒范围未选中', paused: '通知已暂停', disabled: '通道关闭', queued: '等待发送', accepted: '接口已接受', failed: '发送失败，自动重试', expired: '已过期，不补发', withdrawn: '记录已更正，不再发送' };
@@ -20,10 +23,10 @@ function toast(text) { clearTimeout(toastTimer); $('#toast').textContent = text;
 function setBusy(value) { pending = value; $('#refresh').disabled = value; $('#refresh .icon').classList.toggle('busy', value); }
 async function reload(check = false) {
   setBusy(true);
-  try { if (check && data?.connected) await request('request', { path: '/check', body: {} }); data = await request('overview');
+  try { if (check && data?.connected) await request('request', { path: '/check', body: {} }); data = preserveOverview(data, await request('overview'));
     if (data.status && !data.status.service) { data.needsCloudUpdate = true; data.status.service = { enabled: true, configured: true, lastTest: data.status.lastTestResult }; }
     latestError = data.error || ''; render(); }
-  catch (error) { latestError = error.message; render(); }
+  catch (error) { latestError = error.message; if (data?.status) data = preserveOverview(data, { ...data, status: null, error: error.message }); render(); }
   finally { setBusy(false); }
 }
 function switchControl(channel, enabled, label) { return `<button class="switch" role="switch" aria-checked="${!!enabled}" aria-label="${label}" data-toggle="${channel}"></button>`; }
@@ -52,20 +55,10 @@ function channelCard(kind) {
     <p class="channel-note">${enabled ? confirmed ? '手机测试已确认' : '尚未确认手机送达' : configured ? '绑定已保留' : chat ? '扫码绑定，需定期回复续期' : '绑定后接收服务号通知'}</p>
     <div class="channel-actions"><button class="text-button" data-action="${chat ? 'chat' : 'service'}">${configured ? '更换绑定' : '绑定并开启'}</button>${enabled ? `<button class="text-button" data-action="${chat ? 'test-chat' : 'test-service'}">发送测试</button>` : ''}${chat && enabled ? '<button class="text-button" data-action="chat-refresh">刷新会话</button>' : ''}${chat && configured && page === 'notifications' ? '<button class="text-button" data-action="chat-clear">清除绑定</button>' : ''}</div></section>`;
 }
-function recentRow(row) { return `<div class="recent-row"><div class="event-icon">${icon(row.stage === 'planned' ? 'bell' : 'check')}</div><div><h3>${h(row.title)}</h3><p>${time(row.at)} · 北京时间</p></div>${link(row.url)}</div>`; }
 function home() {
-  const s = data.status, c = data.chat, items = (s.activity || []).filter(row => !row.withdrawn), latest = items.find(row => row.stage !== 'banked');
-  const fresh = s.lastSourceSuccess && Date.now() - s.lastSourceSuccess <= 900000 && !s.sourceError;
-  const stageLabel = { planned: '重置预告', rolling: '正在发放', completed: 'Tibo 完成声明', observed: '第三方监测记录' }[latest?.stage];
-  const title = fresh ? latest ? latest.title.replace(/^Tibo[：:]\s*|^监测站[：:]\s*/, '') : '暂未发现新的重置消息' : '暂时无法确认最新情况';
-  const description = latest ? latest.stage === 'observed' ? '监测站记录到一次重置；你的账号是否到账，请查看额度页面。'
-    : latest.stage === 'completed' ? 'Tibo 已宣布完成重置；你的账号是否到账，请查看额度页面。' : 'Tibo 发布了预告或发放进度，尚不能据此认定额度已到账。'
-    : '有新的公开重置消息时，这里会自动更新。';
-  return heading('最新消息', '', button('test', '测试通知', 'bell')) + warnings(s, c)
-    + `<section class="hero"><div class="hero-head"><span class="pill ${!fresh || !latest || latest.stage === 'observed' ? 'neutral' : latest.stage === 'completed' ? '' : 'blue'}">${fresh ? stageLabel || '持续监测中' : '等待更新'}</span></div><h3>${h(title)}</h3><p class="description">${h(description)}</p><div class="hero-foot"><span>${latest ? '消息时间：' + time(latest.at) : '每两分钟自动检查'}${latest ? ' · 北京时间' : ''}</span>${latest ? link(latest.url) : ''}</div></section>`
-    + `<h2 class="section-title">通知通道</h2><div class="channel-grid">${channelCard('service')}${channelCard('chat')}</div>`
-    + `<h2 class="section-title">最近动态 <button class="text-button" data-nav="activity">查看全部 ${icon('chevron-right')}</button></h2><div class="card recent-card">${items.length ? items.slice(0, 3).map(recentRow).join('') : '<div class="empty">暂时没有重置消息。首次更新只建立记录，不补发历史通知。</div>'}</div>`;
+  return renderOverview(data.status, { month: calendarView, selectedDay: calendarSelected });
 }
+
 function activity() {
   const s = data.status, c = data.chat;
   return heading('最近动态', `${(s.activity || []).length} 条记录`) + `<div class="activity-list">${(s.activity || []).map(row => {
@@ -90,6 +83,7 @@ function render() {
   const scrollTop = $('#main').scrollTop;
   document.querySelectorAll('[data-page]').forEach(el => { el.classList.toggle('active', el.dataset.page === page); el.setAttribute('aria-current', el.dataset.page === page ? 'page' : 'false'); });
   $('#page-name').textContent = titles[page];
+  updateTodayLabel();
   if (!connectionReady) { $('#main').innerHTML = `<div class="welcome"><h1>连接本机管理页面</h1><p>${h(latestError || '请重新双击“打开网页版.cmd”。')}</p></div>`; return; }
   const errorBox = latestError ? `<div class="notice">${icon('triangle-alert')}<span>当前状态读取失败：${h(latestError)}${data?.connected ? ' 下方为上次读取的记录。' : ''}</span></div>` : '';
   $('#main').innerHTML = '<div class="content">' + errorBox + (!data ? '<div class="loading"><span class="spinner"></span><p>正在读取最新动态…</p></div>' : !data.connected ? welcome() : !data.status ? offline() : ({ home, activity, notifications, more }[page])()) + '</div>';
@@ -164,6 +158,12 @@ function diagnostics() {
 document.addEventListener('click', async event => {
   const el = event.target.closest('button'); if (!el || el.disabled) return;
   if (el.dataset.page || el.dataset.nav) { pageScroll.set(page, $('#main').scrollTop); page = el.dataset.page || el.dataset.nav; render(); $('#main').scrollTop = pageScroll.get(page) || 0; $('#main').focus({ preventScroll: true }); return; }
+  if (el.dataset.calendarStep) {
+    calendarView = shiftMonth(calendarView || chinaDate(Date.now()).slice(0, 7), Number(el.dataset.calendarStep));
+    calendarSelected = null; render(); $(`[data-calendar-step="${el.dataset.calendarStep}"]`)?.focus({ preventScroll: true }); return;
+  }
+  if (el.hasAttribute('data-calendar-current')) { calendarView = null; calendarSelected = null; render(); $('[data-calendar-current]')?.focus({ preventScroll: true }); return; }
+  if (el.dataset.calendarDay) { calendarSelected = el.dataset.calendarDay; calendarView = calendarSelected.slice(0, 7); render(); $(`[data-calendar-day="${calendarSelected}"]`)?.focus({ preventScroll: true }); return; }
   if (el.dataset.reply !== undefined) return reply(el.dataset.reply);
   if (el.hasAttribute('data-close-flow')) return closeFlow();
   if (el.dataset.scope) return mutate('/settings', { ...data.status.settings, alerts: el.dataset.scope }, '提醒内容已保存');
@@ -187,7 +187,8 @@ document.addEventListener('submit', event => { if (event.target.id === 'answer-f
 $('#refresh').addEventListener('click', () => reload(true));
 $('#flow-close').addEventListener('click', closeFlow);
 $('#flow').addEventListener('cancel', event => { event.preventDefault(); closeFlow(); });
-$('#today').textContent = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short' }).format(new Date());
+function updateTodayLabel() { $('#today').textContent = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short' }).format(new Date()); }
+updateTodayLabel();
 async function init() {
   const token = location.hash.slice(1); history.replaceState(null, '', location.pathname);
   try {

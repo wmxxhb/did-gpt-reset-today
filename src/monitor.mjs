@@ -1,5 +1,6 @@
 import { buildNotifications } from './classify.mjs';
 import { allowsNotification } from './settings.mjs';
+import { mergeResetHistory } from './reset-history.mjs';
 
 export const FEED_URL = 'https://codex-reset.com/api/feed?locale=zh';
 export const PUSH_URL = 'https://www.pushplus.plus/send';
@@ -141,7 +142,7 @@ export class Monitor {
         // Keep the audit row, but retract previously classified chatter when the
         // same source post is present and no longer qualifies as a reset signal.
         const withdrawn = new Set(s.withdrawnIds || []);
-        const candidates = [...(s.activity || []), ...s.queue, ...(s.clawbotOutbox || [])];
+        const candidates = [...(s.activity || []), ...(s.resetHistory || []), ...s.queue, ...(s.clawbotOutbox || [])];
         for (const item of candidates) {
           const id = item.key.split(':')[0];
           if (currentIds.has(id) && !recognizedIds.has(id)) withdrawn.add(id);
@@ -151,6 +152,7 @@ export class Monitor {
         s.queue = s.queue.filter(item => !withdrawn.has(item.key.split(':')[0]));
         s.clawbotOutbox = (s.clawbotOutbox || []).filter(item => !withdrawn.has(item.key.split(':')[0]));
         s.withdrawnIds = [...withdrawn].slice(-80);
+        s.resetHistory = mergeResetHistory(s.resetHistory, [...(s.activity || []), ...items], s.withdrawnIds, now);
         const hours = Number(this.env.MAX_AGE_HOURS || 72);
         if (!Number.isFinite(hours) || hours < 1 || hours > 168) throw new Error('source_invalid_max_age');
         for (const item of items) {

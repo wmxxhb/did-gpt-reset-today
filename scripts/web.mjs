@@ -9,7 +9,8 @@ import { WebUI } from './lib/web-ui.mjs';
 
 const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
-  '/style.css': ['style.css', 'text/css; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'] };
+  '/style.css': ['style.css', 'text/css; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'],
+  '/dashboard.mjs': ['dashboard.mjs', 'text/javascript; charset=utf-8'] };
 const operations = new Set(['setup', 'connect', 'recover', 'continue', 'service', 'chat', 'test', 'test-service', 'test-chat', 'updates']);
 const requests = new Set(['/check', '/settings', '/channels', '/pause', '/resume', '/clawbot/toggle', '/clawbot/refresh', '/clawbot/disable']);
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
