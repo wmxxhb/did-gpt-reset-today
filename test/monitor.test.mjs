@@ -62,6 +62,38 @@ test('original text distinguishes preview, rollout, completion and uncertainty',
   assert.equal(classifyText('Landing sometime today by EOD PST', false), null);
 });
 
+test('asking for resets and unrelated future actions are not reset announcements', () => {
+  for (const text of [
+    'People have escaped the TL and are asking me for resets on the street now. I’ll make little cards to hand out',
+    'People are asking me for resets today',
+    'People will be asking me for resets tomorrow',
+    'The reset button is blue. I will make a card tomorrow.',
+  ]) assert.equal(classifyText(text), null, text);
+  for (const text of ['People are asking me for resets. We will reset today.',
+    'People are asking for resets so I will reset limits today.', 'I will give another reset today.']) {
+    assert.equal(classifyText(text), 'planned', text);
+  }
+});
+
+test('withdrawn chatter leaves the headline and both outboxes, with correction preserved after feed rotation', async () => {
+  const h = harness();
+  h.setFeed(feed([post('We have reset usage limits', '111')]));
+  await h.monitor.check();
+  const s = await h.monitor.load();
+  const key = POST_ID + ':planned';
+  s.activity.unshift({ key, stage: 'planned', title: 'Tibo：预告重置', at: new Date(TIME + 1000).toISOString(), service: 'queued' });
+  s.queue.push({ key, id: POST_ID, title: 'chatter', attempts: 0, nextAttempt: 0 });
+  s.clawbotOutbox = [{ key, id: POST_ID, queuedAt: TIME }];
+  await h.monitor.save(s); h.advance();
+  h.setFeed(feed([post('People are asking me for resets today')], [], TIME + 120000));
+  const corrected = await h.monitor.check();
+  assert.equal(corrected.activity.find(row => row.key === key).withdrawn, true);
+  assert.equal(corrected.queue.length, 0); assert.equal(corrected.clawbotOutbox.length, 0);
+  assert.ok(corrected.withdrawnIds.includes(POST_ID)); assert.equal(h.messages.length, 0);
+  h.advance(); h.setFeed(feed([], [], TIME + 240000));
+  assert.equal((await h.monitor.check()).activity.find(row => row.key === key).withdrawn, true);
+});
+
 test('baseline is silent; a later promise and completion each notify exactly once in normal runs', async () => {
   const h = harness();
   h.setFeed(feed([post('We have reset usage limits')]));

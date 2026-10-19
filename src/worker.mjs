@@ -135,7 +135,7 @@ export class ResetMonitor {
 
 function publicStatus(s, env) {
   return {
-    version: VERSION, service: serviceChannel(s, env), activity: s.activity || [], policyRevision: s.policyRevision || 0,
+    version: VERSION, service: serviceChannel(s, env), activity: s.activity || [], policyRevision: s.policyRevision || 0, withdrawnIds: s.withdrawnIds || [],
     initialized: s.initialized, paused: s.paused,
     lastCheck: s.lastCheck, lastSourceSuccess: s.lastSuccess, sourceError: s.lastError,
     consecutiveSourceFailures: s.failures, nextFetch: s.nextFetch,
@@ -179,7 +179,7 @@ export default {
         console.error(JSON.stringify({ sourceError: status.sourceError, pending: status.pending.length }));
       }
       const bot = await botStub(env).fetch('https://monitor/clawbot/tick', {
-        method: 'POST', body: JSON.stringify({ paused: status.paused, settings: status.settings, revision: status.policyRevision }),
+        method: 'POST', body: JSON.stringify({ paused: status.paused, settings: status.settings, revision: status.policyRevision, withdrawnIds: status.withdrawnIds }),
       });
       if (!bot.ok) console.error('clawbot_tick_failed');
     }));

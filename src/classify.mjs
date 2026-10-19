@@ -33,12 +33,17 @@ export function classifyText(text, context = false) {
       || /(?:^|\n)\s*(should we|would you|could we)\b/.test(t)) return null;
   const reset = /\bresets?\b/.test(t);
   if (!reset && !context) return null;
-  const future = /\b(will|going to|later|tomorrow|by eod|by end of|next \d+|next hour|next few|within|in (?:the )?(?:next )?(?:\d+|an?|one|two) (?:hours?|minutes?))\b/.test(t);
-  const progress = /\b(propagating|rolling out|being (?:reset|processed)|in progress|loading|landing)\b/.test(t);
-  if (future) return 'planned';
+  // A future action in another sentence (e.g. making cards) is not a reset promise.
+  const relevant = reset ? t.split(/[.!?\n]+/).filter(clause => /\bresets?\b/.test(clause)).join('\n') : t;
+  const future = /\b(will|we'll|i'll|going to|later|tomorrow|by eod|by end of|next \d+|next hour|next few|within|in (?:the )?(?:next )?(?:\d+|an?|one|two) (?:hours?|minutes?))\b/.test(relevant);
+  const progress = /\b(propagating|rolling out|being (?:reset|processed)|in progress|loading|landing)\b/.test(relevant);
+  const intent = /\b(?:will|we'll|i'll|going to)\s+(?:(?:also|again|soon|just|be|a|another|global|usage|limit|limits|have|do|give|run|perform|issue|trigger|ship|start|apply)\s+){0,6}resets?\b/.test(relevant)
+    || /\bresets?\s+(?:will|is going to)\s+(?:land|happen|arrive|roll|start|be)\b/.test(relevant);
+  const discussingRequests = /\b(asking|asked|begging|requests?|requesting|cards)\b/.test(relevant);
+  if (future && (intent || !discussingRequests)) return 'planned';
   if (progress) return 'rolling';
   if (/\b(have|has|had|been|was|were|i've|we've)\b.{0,25}\breset\b|\breset\b.{0,20}\b(completed|processed|done|applied)\b|\b(all propagated|it's done|it is done|done and dusted|has landed|have landed|confirmed landed|i reset|we reset)\b/.test(t)) return 'completed';
-  if (reset && (/\b(today|by eod|we'll|i'll)\b/.test(t) || /\bday \d+\s*\//.test(t))) return 'planned';
+  if (reset && !discussingRequests && (/\b(today|by eod)\b/.test(relevant) || /\bday \d+\s*\//.test(relevant))) return 'planned';
   return null;
 }
 

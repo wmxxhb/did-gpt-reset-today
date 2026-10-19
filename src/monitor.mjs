@@ -136,6 +136,21 @@ export class Monitor {
             || now - Date.parse(feed.fetched_at) > 15 * 60000
             || Date.parse(feed.fetched_at) > now + 5 * 60000) throw new Error('source_stale');
         const items = buildNotifications(feed);
+        const currentIds = new Set(feed.tweets.map(post => String(post.id)));
+        const recognizedIds = new Set(items.map(item => String(item.id).split(':')[0]));
+        // Keep the audit row, but retract previously classified chatter when the
+        // same source post is present and no longer qualifies as a reset signal.
+        const withdrawn = new Set(s.withdrawnIds || []);
+        const candidates = [...(s.activity || []), ...s.queue, ...(s.clawbotOutbox || [])];
+        for (const item of candidates) {
+          const id = item.key.split(':')[0];
+          if (currentIds.has(id) && !recognizedIds.has(id)) withdrawn.add(id);
+        }
+        for (const id of recognizedIds) withdrawn.delete(id);
+        for (const row of s.activity || []) row.withdrawn = withdrawn.has(row.key.split(':')[0]);
+        s.queue = s.queue.filter(item => !withdrawn.has(item.key.split(':')[0]));
+        s.clawbotOutbox = (s.clawbotOutbox || []).filter(item => !withdrawn.has(item.key.split(':')[0]));
+        s.withdrawnIds = [...withdrawn].slice(-80);
         const hours = Number(this.env.MAX_AGE_HOURS || 72);
         if (!Number.isFinite(hours) || hours < 1 || hours > 168) throw new Error('source_invalid_max_age');
         for (const item of items) {

@@ -4,11 +4,11 @@ const clean = value => String(value || '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, 
 const chatLabels = { disabled: '关闭', needs_login: '需重新扫码', needs_reply: '需回复一句话续期',
   quota_exhausted: '需回复一句话续期', ready: '可用', error: '连接异常' };
 const outcomes = { historical: '历史记录，不补发', filtered: '未通知：提醒范围未选中', paused: '未通知：已暂停',
-  disabled: '未通知：通道关闭', queued: '等待发送', accepted: '接口已接受', failed: '发送失败，自动重试', expired: '已过期，不再补发' };
+  disabled: '未通知：通道关闭', queued: '等待发送', accepted: '接口已接受', failed: '发送失败，自动重试', expired: '已过期，不再补发', withdrawn: '记录已更正，不再发送' };
 
 export function homeLines(s, chat, now = Date.now()) {
   const fresh = s.lastSourceSuccess && now - s.lastSourceSuccess <= 900000 && !s.sourceError;
-  const latest = (s.activity || []).find(row => row.stage !== 'banked');
+  const latest = (s.activity || []).find(row => row.stage !== 'banked' && !row.withdrawn);
   const service = s.service || { enabled: true, configured: true };
   const lines = ['\nGPT今天重置了吗？', '关注 Codex / ChatGPT Work 的公开重置消息。'];
   if (!fresh) lines.push('最新动态：暂时无法确认最新情况' + (s.initialized ? '，正在自动更新' : '，等待首次更新'));
@@ -43,6 +43,7 @@ export function activityLines(s, chat, limit = 12) {
   const lines = ['\n最近动态（时间均为北京时间）'];
   for (const row of rows) {
     lines.push(`\n${chinaTime(row.at)}  ${clean(row.title)}`);
+    if (row.withdrawn) { lines.push('记录已更正：当前不再认定为重置消息。'); continue; }
     if (row.text) lines.push(clean(row.text).replace(/\s+/g, ' ').slice(0, 220));
     if (row.url) lines.push(row.url);
     lines.push('服务号：' + (outcomes[row.service] || '未记录发送结果'));

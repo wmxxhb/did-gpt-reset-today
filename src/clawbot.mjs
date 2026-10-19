@@ -204,6 +204,11 @@ export class ClawBot {
   async tick(input = {}) {
     const s = await this.load();
     if (!s.enabled) return clawbotStatus(s, this.clock());
+    const withdrawn = new Set(input.withdrawnIds || []);
+    s.queue = s.queue.filter(q => {
+      if (!withdrawn.has(String(q.id).split(':')[0]) && !withdrawn.has(q.key.split(':')[0])) return true;
+      record(s, q, 'withdrawn', this.clock()); return false;
+    });
     s.queue = s.queue.filter(q => {
       if (q.expiresAt <= this.clock()) record(s, q, 'expired', this.clock());
       return q.expiresAt > this.clock();
@@ -240,7 +245,7 @@ export class ClawBot {
       let input = {};
       if (request.method === 'POST') {
         const raw = await request.text();
-        if (raw.length > (path === '/clawbot/enqueue' ? 200000 : 2048)) return json({ error: 'invalid_request' }, 413);
+        if (raw.length > (['/clawbot/enqueue', '/clawbot/tick'].includes(path) ? 200000 : 2048)) return json({ error: 'invalid_request' }, 413);
         try { input = raw ? JSON.parse(raw) : {}; } catch { return json({ error: 'invalid_request' }, 400); }
         if (!input || typeof input !== 'object' || Array.isArray(input)) return json({ error: 'invalid_request' }, 400);
       }

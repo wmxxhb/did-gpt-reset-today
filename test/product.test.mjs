@@ -142,6 +142,30 @@ test('notification test offers only enabled channels and can exit when both are 
   }
 });
 
+test('corrected chatter is excluded from the headline and explained in history', () => {
+  const s = { initialized: true, lastSourceSuccess: NOW, service: { enabled: false }, activity: [
+    { key: '222:planned', title: '预告', stage: 'planned', withdrawn: true, at: new Date(NOW).toISOString() },
+    { key: '111:completed', title: '完成', stage: 'completed', at: new Date(NOW - 1000).toISOString() },
+  ] };
+  const chat = { enabled: false, state: 'disabled' };
+  assert.match(homeLines(s, chat, NOW).join('\n'), /最新动态：完成/);
+  assert.match(activityLines(s, chat).join('\n'), /记录已更正/);
+});
+
+test('withdrawn reset chatter is removed from the chat queue before sending', async () => {
+  const storage = memory(); let sends = 0;
+  const bot = new ClawBot(storage, async url => {
+    if (url.includes('sendmessage')) { sends++; return Response.json({ message_id: 'synthetic' }); }
+    return Response.json({ ret: 0, msgs: [] });
+  }, () => NOW);
+  await bot.save({ enabled: true, token: 'synthetic', user: 'owner', boundAt: NOW - 1000,
+    context: 'synthetic', lastInboundAt: NOW, sent: 0, seen: {},
+    queue: [{ key: '111:planned', id: 'synthetic-uuid', expiresAt: NOW + 60000, nextAttempt: 0 }] });
+  await bot.tick({ withdrawnIds: ['111'] });
+  assert.equal(sends, 0); assert.equal((await bot.load()).queue.length, 0);
+  assert.equal((await bot.load()).recent[0].status, 'withdrawn');
+});
+
 test('version checker pins package lookup to a verified commit and never includes account credentials', async () => {
   const sha = 'a'.repeat(40); const requests = [];
   const result = await latestVersion(async (url, options) => {
