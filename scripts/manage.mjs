@@ -6,6 +6,7 @@ import { UI } from './lib/ui.mjs';
 import { api as requestApi, statusLines, workerUrl, deploymentUrl } from './lib/client.mjs';
 import { saveProfile, loadProfile } from './lib/profile.mjs';
 import { deploy, wrangler } from './lib/cloud.mjs';
+import { manageClawbot, chatStatusLines } from './lib/clawbot.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ui = new UI();
@@ -16,6 +17,10 @@ const REQUEST_LABELS = {
   '/test': '正在提交微信测试通知', '/confirm-test': '正在保存你的送达确认',
   '/check': '正在检查最新公告', '/pause': '正在暂停提醒', '/resume': '正在恢复提醒',
   '/reset-test': '正在更新微信验证状态',
+  '/clawbot/login/start': '正在生成微信聊天绑定二维码', '/clawbot/login/poll': '正在等待手机扫码确认',
+  '/clawbot/status': '正在读取聊天通道状态', '/clawbot/refresh': '正在同步你发给 ClawBot 的消息',
+  '/clawbot/test': '正在提交聊天测试通知', '/clawbot/confirm-test': '正在记录聊天送达确认',
+  '/clawbot/disable': '正在关闭并清除聊天绑定',
 };
 function api(account, path, body) {
   return ui.task(REQUEST_LABELS[path] || '正在连接云端', () => requestApi(account, path, body), { timeoutMs: 30000 });
@@ -93,6 +98,10 @@ async function showStatus() {
   const status = await api(profile, '/status');
   console.log('\n' + statusLines(status).join('\n'));
   console.log('工具地址：' + profile.url);
+  try { console.log(chatStatusLines(await api(profile, '/clawbot/status')).join('\n')); }
+  catch (error) {
+    console.log(error.code === 'not_found' ? '聊天提醒：云端版本尚不支持，可从菜单更新后开启。' : '聊天通道状态暂时无法读取。');
+  }
   return status;
 }
 
@@ -201,6 +210,7 @@ async function main() {
         1: '查看运行状态', 2: '发送微信测试通知', 3: '选择提醒内容',
         4: '暂停 / 恢复提醒', 5: '更换微信绑定', 6: '更新云端程序（保留绑定）',
         7: '重新接管管理权限（旧管理密钥将失效）', 0: '退出，云端监控继续运行',
+        8: '微信聊天提醒（ClawBot，可选）',
       }, '1');
       if (answer === '0') return;
       if (answer === '1') await showStatus();
@@ -232,6 +242,7 @@ async function main() {
         await showStatus();
       }
       if (answer === '7') await openService(true);
+      if (answer === '8') await manageClawbot(ui, (path, body) => api(profile, path, body));
     } catch (error) {
       console.log('\n这一步尚未完成：' + error.message);
       console.log('可从菜单选择重试；不需要重新注册微信推送账号。');

@@ -20,7 +20,7 @@ if ($tiboMajor -lt 22) {
     }
 }
 $env:Path = (Split-Path -Parent $tiboNode) + ';' + $env:Path
-if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'))) {
+if ((-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\wrangler\bin\wrangler.js'))) -or (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules\qrcode-terminal\package.json')))) {
     $tiboNpmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $tiboNpmCommand) { throw '未找到 npm，请安装 Node.js：https://nodejs.org/' }
     $tiboNpmCli = Join-Path (Split-Path -Parent $tiboNpmCommand.Source) 'node_modules\npm\bin\npm-cli.js'

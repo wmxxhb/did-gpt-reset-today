@@ -1,5 +1,10 @@
 import { Monitor, pushMessage, safeError } from './monitor.mjs';
 import { normalizeSettings, allowsNotification } from './settings.mjs';
+import { ClawBot } from './clawbot.mjs';
+
+const botStub = env => env.MONITOR.get(env.MONITOR.idFromName('personal-clawbot-v1'));
+const BOT_ROUTES = ['/clawbot/status', '/clawbot/login/start', '/clawbot/login/poll',
+  '/clawbot/refresh', '/clawbot/test', '/clawbot/confirm-test', '/clawbot/disable'];
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 
@@ -7,7 +12,13 @@ const json = (data, status = 200) => Response.json(data, { status, headers: { 'C
 export class ResetMonitor {
   constructor(ctx, env) {
     this.storage = ctx.storage;
-    this.monitor = new Monitor(ctx.storage, env);
+    this.monitor = new Monitor(ctx.storage, env, undefined, undefined, env.MONITOR ? async items => {
+      const result = await botStub(env).fetch('https://monitor/clawbot/enqueue', {
+        method: 'POST', body: JSON.stringify({ items }),
+      });
+      if (!result.ok) throw new Error('clawbot_enqueue_failed');
+    } : null);
+    this.clawbot = new ClawBot(ctx.storage);
     this.env = env;
     this.tail = Promise.resolve();
   }
@@ -18,6 +29,7 @@ export class ResetMonitor {
   }
   async handle(request) {
     const path = new URL(request.url).pathname;
+    if (path.startsWith('/clawbot/')) return this.clawbot.handle(request);
     if (path === '/check') {
       const state = await this.monitor.check();
       return json(publicStatus(state));
@@ -89,6 +101,7 @@ function publicStatus(s) {
     settings: normalizeSettings(s.settings),
     pending: s.queue.map(q => ({ title: q.title, attempts: q.attempts, nextAttempt: q.nextAttempt, error: q.lastError || null })),
     recentSubmissions: s.receipts,
+    clawbotEnqueueError: s.clawbotError || null,
     note: 'accepted 仅表示推送服务已接收，不代表手机已收到。Data: https://codex-reset.com/',
   };
 }
@@ -123,14 +136,19 @@ export default {
       if (status.sourceError || status.pending.some(q => q.error)) {
         console.error(JSON.stringify({ sourceError: status.sourceError, pending: status.pending.length }));
       }
+      const bot = await botStub(env).fetch('https://monitor/clawbot/tick', {
+        method: 'POST', body: JSON.stringify({ paused: status.paused, settings: status.settings }),
+      });
+      if (!bot.ok) console.error('clawbot_tick_failed');
     }));
   },
   async fetch(request, env) {
     if (!(await authorized(request, env.ADMIN_TOKEN))) return json({ error: 'unauthorized' }, 401);
     const path = new URL(request.url).pathname;
-    if (!['/status', '/check', '/test', '/pause', '/resume', '/settings', '/confirm-test', '/reset-test'].includes(path)) return json({ error: 'not_found' }, 404);
-    const allowed = path === '/status' ? ['GET'] : path === '/settings' ? ['GET', 'POST'] : ['POST'];
+    if (!['/status', '/check', '/test', '/pause', '/resume', '/settings', '/confirm-test', '/reset-test', ...BOT_ROUTES].includes(path)) return json({ error: 'not_found' }, 404);
+    const allowed = ['/status', '/clawbot/status'].includes(path) ? ['GET'] : path === '/settings' ? ['GET', 'POST'] : ['POST'];
     if (!allowed.includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
+    if (BOT_ROUTES.includes(path)) return botStub(env).fetch(request);
     return env.MONITOR.get(env.MONITOR.idFromName('personal-monitor-v1')).fetch(request);
   },
 };

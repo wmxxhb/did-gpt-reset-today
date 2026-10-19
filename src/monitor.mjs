@@ -92,8 +92,9 @@ export function safeError(error) {
 }
 
 export class Monitor {
-  constructor(storage, env, fetcher = fetch, clock = () => Date.now()) {
+  constructor(storage, env, fetcher = fetch, clock = () => Date.now(), secondary = null) {
     this.storage = storage; this.env = env; this.fetcher = fetcher; this.clock = clock;
+    this.secondary = secondary;
   }
   async load() { return (await this.storage.get('state')) || emptyState(); }
   async save(state) { await this.storage.put('state', state); }
@@ -121,6 +122,7 @@ export class Monitor {
             continue;
           }
           s.queue.push({ ...item, attempts: 0, nextAttempt: now });
+          if (this.secondary) (s.clawbotOutbox ||= []).push({ ...item, queuedAt: now });
         }
         s.initialized = true;
         s.lastSuccess = now; s.lastError = null; s.failures = 0;
@@ -165,6 +167,17 @@ export class Monitor {
     // Keep 90 days of dedupe markers, much longer than the 72-hour catch-up window.
     for (const [key, time] of Object.entries(s.seen)) if (now - time > 90 * 86400000) delete s.seen[key];
     await this.save(s);
+    if (this.secondary) {
+      s.clawbotOutbox = (s.clawbotOutbox || []).filter(item => now - item.queuedAt < 3600000 && allowsNotification(item, s.settings));
+      const batch = s.clawbotOutbox.slice(0, 20);
+      if (batch.length) {
+        try {
+          await this.secondary(batch);
+          s.clawbotOutbox.splice(0, batch.length); s.clawbotError = null;
+        } catch { s.clawbotError = 'clawbot_enqueue_failed'; }
+      }
+      await this.save(s);
+    }
     return s;
   }
 }

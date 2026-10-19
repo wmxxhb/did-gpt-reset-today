@@ -35,7 +35,7 @@ export async function api(profile, path, body, fetcher = systemFetch) {
   let response;
   try {
     response = await fetcher(workerUrl(profile.url) + path, {
-      method: ['/status', '/settings'].includes(path) && body === undefined ? 'GET' : 'POST',
+      method: ['/status', '/settings', '/clawbot/status'].includes(path) && body === undefined ? 'GET' : 'POST',
       headers: { Authorization: `Bearer ${profile.admin}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(30000), redirect: 'error',
@@ -61,6 +61,18 @@ export async function api(profile, path, body, fetcher = systemFetch) {
       unauthorized: '管理凭据不匹配。请回到菜单，选择重新接管工具或导入原管理密钥。',
       test_rate_limited: '测试通知每分钟最多一条，请一分钟后重试。',
       invalid_settings: '提醒选项无效，请重新选择。',
+      not_found: '云端版本尚不支持此功能，请先从主菜单选择“更新云端程序（保留绑定）”。',
+      clawbot_reply_required: '聊天会话已过期或额度用尽。请向微信 ClawBot 回复一句话，再选择刷新会话状态。',
+      clawbot_login_expired: 'ClawBot 登录已失效，请重新扫码绑定。',
+      clawbot_disabled: '聊天提醒尚未开启，请先扫码绑定。',
+      clawbot_timeout: '微信聊天接口暂时超时，请稍后重试。',
+      clawbot_network_failed: '云端暂时无法连接微信聊天接口，请稍后重试。服务号监控仍独立运行。',
+      clawbot_unavailable: '聊天通道暂时不可用，请稍后重试或更新云端程序。',
+      clawbot_http_429: '微信聊天接口暂时限流，请稍后重试。',
+      clawbot_needs_rebind: '微信提示已绑定其他实例，但本工具没有凭据，请在手机端重新建立绑定。',
+      clawbot_invalid_host: '微信返回了未支持的服务器地址，已停止连接，请更新程序。',
+      clawbot_invalid_response: '微信聊天接口返回了无法识别的结果，请稍后重试或更新程序。',
+      clawbot_rejected: '微信暂未接受聊天请求，请先回复 ClawBot 一句话并刷新，仍失败时重新扫码绑定。',
     };
     throw Object.assign(new Error(hints[data.error] || data.hint || `操作失败（${data.reason || data.error || response.status}）。`), { code: data.error || 'request_failed' });
   }
