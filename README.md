@@ -2,7 +2,7 @@
 
 **在微信上接收 GPT 额度重置提醒。** Tibo（[@thsottiaux](https://x.com/thsottiaux)）发布 Codex / ChatGPT Work 重置预告或完成消息后，工具会自动检查，并通过你选择的微信通道通知你。
 
-默认在预告和完成时分别提醒。开通后监控在云端运行，电脑关机也能继续接收通知。网页和终端用于开通、管理提醒及查询记录，无需一直打开。
+默认在预告和完成时分别提醒。完成开通后，即使关闭电脑，微信也能继续接收通知。只有开通、调整设置或查询记录时，才需要打开网页或终端。
 
 **[下载最新版 ZIP](https://github.com/wmxxhb/did-gpt-reset-today/archive/refs/heads/main.zip)** → 完整解压 → 打开管理入口 → 绑定微信并确认收到测试通知。
 
